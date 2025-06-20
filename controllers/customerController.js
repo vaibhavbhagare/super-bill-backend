@@ -15,19 +15,34 @@ exports.createCustomer = async (req, res) => {
 // Read all
 exports.getCustomers = async (req, res) => {
   try {
-    const customers = await Customer.find();
-    whatsappService.sendWhatsAppMessage(
-        'Ketan Ligade', 
-        120, 
-        '+919960038085', 
-        'https://content.jdmagicbox.com/comp/solapur/u7/9999px217.x217.221207222759.g8u7/catalogue/bhagare-super-market-ankoli-solapur-general-stores-9o7ehqfh88.jpg'
-      );
-    res.json(customers);
+    const page = parseInt(req.query.page) > 0 ? parseInt(req.query.page) : 1;
+    const limit = parseInt(req.query.limit) > 0 ? parseInt(req.query.limit) : 10;
+    const skip = (page - 1) * limit;
+
+    const [customers, total] = await Promise.all([
+      Customer.find().skip(skip).limit(limit),
+      Customer.countDocuments()
+    ]);
+
+    res.json({
+      data: customers,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit)
+    });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 };
 
+//  whatsappService.sendWhatsAppMessage(
+//         'Ketan Ligade', 
+//         120, 
+//         '+919960038085', 
+//         'https://content.jdmagicbox.com/comp/solapur/u7/9999px217.x217.221207222759.g8u7/catalogue/bhagare-super-market-ankoli-solapur-general-stores-9o7ehqfh88.jpg'
+//       );
+//     res.json(customers);
 // Read one
 exports.getCustomerById = async (req, res) => {
   try {
