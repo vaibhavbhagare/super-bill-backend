@@ -19,9 +19,27 @@ exports.getCustomers = async (req, res) => {
     const limit = parseInt(req.query.limit) > 0 ? parseInt(req.query.limit) : 10;
     const skip = (page - 1) * limit;
 
+    // Search logic: search on fullName and phoneNumber
+    const filter = {};
+    if (req.query.search) {
+      const searchRegex = new RegExp(req.query.search, 'i');
+      filter.$or = [
+        { fullName: { $regex: searchRegex } },
+        {
+          $expr: {
+            $regexMatch: {
+              input: { $toString: "$phoneNumber" },
+              regex: req.query.search,
+              options: 'i'
+            }
+          }
+        }
+      ];
+    }
+
     const [customers, total] = await Promise.all([
-      Customer.find().skip(skip).limit(limit),
-      Customer.countDocuments()
+      Customer.find(filter).skip(skip).limit(limit),
+      Customer.countDocuments(filter)
     ]);
 
     res.json({
