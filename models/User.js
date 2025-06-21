@@ -12,6 +12,11 @@ const userSchema = new mongoose.Schema(
       required: true,
       enum: ["admin", "biller", "packer"],
     },
+    language: {
+      type: String,
+      required: true,
+      enum: ["en", "mr", "hi"],
+    },
     updatedBy: String,
   },
   {
