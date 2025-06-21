@@ -4,11 +4,12 @@ const productSchema = new mongoose.Schema(
   {
     name: { type: String, required: true },
     secondName: { type: String },
+    searchKey:{type: string},
     category: { type: String },
     stock: { type: Number, required: true, default: 0 },
     mrp: { type: Number, required: true },
-    salingPrice1: { type: Number, required: true },
-    salingPrice2: { type: Number, required: true },
+    sellingPrice1: { type: Number, required: true },
+    sellingPrice2: { type: Number, required: true },
     brand: { type: String },
     purchasePrice: { type: Number, required: true },
     unit: { 
