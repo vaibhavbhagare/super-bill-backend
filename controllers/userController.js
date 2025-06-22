@@ -68,6 +68,7 @@ exports.loginUser = async (req, res) => {
         userName: user.userName,
         name: user.name,
         role: user.role || "user",
+        language: user.language,
       },
       token,
     });
@@ -123,6 +124,15 @@ exports.createUser = async (req, res) => {
       return res.status(400).json({
         error: "Username or phone number already exists",
         code: "DUPLICATE_USER",
+      });
+    }
+
+    // Validate language
+    const allowedLanguages = ["en", "mr", "hi"];
+    if (!req.body.language || !allowedLanguages.includes(req.body.language)) {
+      return res.status(400).json({
+        error: "Language is required and must be one of: en, mr, hi",
+        code: "INVALID_LANGUAGE",
       });
     }
 

@@ -114,7 +114,7 @@ exports.deleteProduct = async (req, res) => {
     if (!product) return res.status(404).json({ error: "Product not found" });
 
     // You might want to store deletion information in a separate collection
-    console.log(`Product ${product.name} deleted by ${req.user.userName}`);
+ 
 
     const deleted = await Product.findByIdAndDelete(req.params.id);
     res.json({
