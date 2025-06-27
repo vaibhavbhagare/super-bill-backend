@@ -15,7 +15,7 @@ const generateToken = (user) => {
     process.env.JWT_SECRET || "bhagare_super_market",
     {
       expiresIn: process.env.JWT_EXPIRES_IN || "15h",
-    }
+    },
   );
 };
 
@@ -217,17 +217,19 @@ exports.getUsers = async (req, res) => {
 
     // ✅ Send response
     res.json({
-      data : users,
+      data: users,
       total,
       page,
       limit,
-      totalPages: Math.ceil(total / limit)
+      totalPages: Math.ceil(total / limit),
     });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 };
-{/** */}
+{
+  /** */
+}
 // Get user by ID (protected route)
 exports.getUserById = async (req, res) => {
   try {

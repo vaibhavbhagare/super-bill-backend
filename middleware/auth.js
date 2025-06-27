@@ -1,26 +1,26 @@
-const jwt = require('jsonwebtoken');
-const User = require('../models/User');
-const { isBlacklisted } = require('../services/tokenBlacklist');
+const jwt = require("jsonwebtoken");
+const User = require("../models/User");
+const { isBlacklisted } = require("../services/tokenBlacklist");
 
 // Custom error class for authentication errors
 class AuthenticationError extends Error {
   constructor(message) {
     super(message);
-    this.name = 'AuthenticationError';
+    this.name = "AuthenticationError";
     this.status = 401;
   }
 }
 
 // Extract token from header
 const extractToken = (req) => {
-  const authHeader = req.header('Authorization');
+  const authHeader = req.header("Authorization");
   if (!authHeader) {
-    throw new AuthenticationError('No authorization header');
+    throw new AuthenticationError("No authorization header");
   }
 
-  const [bearer, token] = authHeader.split(' ');
-  if (bearer !== 'Bearer' || !token) {
-    throw new AuthenticationError('Invalid authorization header format');
+  const [bearer, token] = authHeader.split(" ");
+  if (bearer !== "Bearer" || !token) {
+    throw new AuthenticationError("Invalid authorization header format");
   }
 
   return token;
@@ -32,23 +32,26 @@ const verifyToken = async (token) => {
     // Check if token is blacklisted
     const isTokenBlacklisted = await isBlacklisted(token);
     if (isTokenBlacklisted) {
-      throw new AuthenticationError('Token has been invalidated');
+      throw new AuthenticationError("Token has been invalidated");
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || "bhagare_super_market");
-    const user = await User.findById(decoded.id).select('-password');
-    
+    const decoded = jwt.verify(
+      token,
+      process.env.JWT_SECRET || "bhagare_super_market",
+    );
+    const user = await User.findById(decoded.id).select("-password");
+
     if (!user) {
-      throw new AuthenticationError('User not found');
+      throw new AuthenticationError("User not found");
     }
 
     return user;
   } catch (error) {
-    if (error.name === 'JsonWebTokenError') {
-      throw new AuthenticationError('Invalid token');
+    if (error.name === "JsonWebTokenError") {
+      throw new AuthenticationError("Invalid token");
     }
-    if (error.name === 'TokenExpiredError') {
-      throw new AuthenticationError('Token expired');
+    if (error.name === "TokenExpiredError") {
+      throw new AuthenticationError("Token expired");
     }
     throw error;
   }
@@ -63,14 +66,14 @@ const auth = async (req, res, next) => {
     next();
   } catch (error) {
     if (error instanceof AuthenticationError) {
-      return res.status(error.status).json({ 
+      return res.status(error.status).json({
         error: error.message,
-        code: 'AUTH_ERROR'
+        code: "AUTH_ERROR",
       });
     }
-    res.status(500).json({ 
-      error: 'Internal server error',
-      code: 'INTERNAL_ERROR'
+    res.status(500).json({
+      error: "Internal server error",
+      code: "INTERNAL_ERROR",
     });
   }
 };
@@ -91,5 +94,5 @@ const optionalAuth = async (req, res, next) => {
 module.exports = {
   auth,
   optionalAuth,
-  AuthenticationError
-}; 
+  AuthenticationError,
+};

@@ -1,6 +1,6 @@
 const Customer = require("../models/Customer");
 
-const whatsappService = require('../controllers/whatsappService');
+const whatsappService = require("../controllers/whatsappService");
 // Create
 exports.createCustomer = async (req, res) => {
   try {
@@ -16,13 +16,14 @@ exports.createCustomer = async (req, res) => {
 exports.getCustomers = async (req, res) => {
   try {
     const page = parseInt(req.query.page) > 0 ? parseInt(req.query.page) : 1;
-    const limit = parseInt(req.query.limit) > 0 ? parseInt(req.query.limit) : 10;
+    const limit =
+      parseInt(req.query.limit) > 0 ? parseInt(req.query.limit) : 10;
     const skip = (page - 1) * limit;
 
     // Search logic: search on fullName and phoneNumber
     const filter = {};
     if (req.query.search) {
-      const searchRegex = new RegExp(req.query.search, 'i');
+      const searchRegex = new RegExp(req.query.search, "i");
       filter.$or = [
         { fullName: { $regex: searchRegex } },
         {
@@ -30,16 +31,16 @@ exports.getCustomers = async (req, res) => {
             $regexMatch: {
               input: { $toString: "$phoneNumber" },
               regex: req.query.search,
-              options: 'i'
-            }
-          }
-        }
+              options: "i",
+            },
+          },
+        },
       ];
     }
 
     const [customers, total] = await Promise.all([
       Customer.find(filter).skip(skip).limit(limit),
-      Customer.countDocuments(filter)
+      Customer.countDocuments(filter),
     ]);
 
     res.json({
@@ -47,7 +48,7 @@ exports.getCustomers = async (req, res) => {
       total,
       page,
       limit,
-      totalPages: Math.ceil(total / limit)
+      totalPages: Math.ceil(total / limit),
     });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -55,9 +56,9 @@ exports.getCustomers = async (req, res) => {
 };
 
 //  whatsappService.sendWhatsAppMessage(
-//         'Ketan Ligade', 
-//         120, 
-//         '+919960038085', 
+//         'Ketan Ligade',
+//         120,
+//         '+919960038085',
 //         'https://content.jdmagicbox.com/comp/solapur/u7/9999px217.x217.221207222759.g8u7/catalogue/bhagare-super-market-ankoli-solapur-general-stores-9o7ehqfh88.jpg'
 //       );
 //     res.json(customers);
@@ -65,7 +66,6 @@ exports.getCustomers = async (req, res) => {
 exports.getCustomerById = async (req, res) => {
   try {
     const customer = await Customer.findById(req.params.id);
-    await createInvoice(req, res);
     if (!customer) return res.status(404).json({ error: "Customer not found" });
     res.json(customer);
   } catch (err) {
