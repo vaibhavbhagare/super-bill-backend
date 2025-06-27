@@ -207,9 +207,10 @@ exports.getUsers = async (req, res) => {
         },
       ];
     }
+    const sort = { lastUpdatedOn: -1 };
 
     const [users, total] = await Promise.all([
-      User.find(filter).skip(skip).limit(limit), // Apply skip & limit!
+      User.find(filter).sort(sort).skip(skip).limit(limit),
       User.countDocuments(filter),
     ]);
 
@@ -227,9 +228,7 @@ exports.getUsers = async (req, res) => {
     res.status(400).json({ error: err.message });
   }
 };
-{
-  /** */
-}
+
 // Get user by ID (protected route)
 exports.getUserById = async (req, res) => {
   try {

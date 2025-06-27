@@ -37,9 +37,9 @@ exports.getCustomers = async (req, res) => {
         },
       ];
     }
-
+    const sort = { lastUpdatedOn: -1 };
     const [customers, total] = await Promise.all([
-      Customer.find(filter).skip(skip).limit(limit),
+      Customer.find(filter).sort(sort).skip(skip).limit(limit),
       Customer.countDocuments(filter),
     ]);
 
