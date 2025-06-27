@@ -53,7 +53,7 @@ exports.getProducts = async (req, res) => {
         },
       ];
     }
-    const sort = { lastUpdatedOn: -1 };
+    const sort = { updatedAt: -1 };
     const [products, total] = await Promise.all([
       Product.find(filter).sort(sort).skip(skip).limit(limit), // Apply skip & limit!
       Product.countDocuments(filter),

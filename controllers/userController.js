@@ -207,7 +207,7 @@ exports.getUsers = async (req, res) => {
         },
       ];
     }
-    const sort = { lastUpdatedOn: -1 };
+    const sort = { updatedAt: -1 };
 
     const [users, total] = await Promise.all([
       User.find(filter).sort(sort).skip(skip).limit(limit),
