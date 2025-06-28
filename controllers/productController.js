@@ -3,8 +3,15 @@ const Product = require("../models/Product");
 // Create
 exports.createProduct = async (req, res) => {
   try {
+    let barcode = req.body.barcode;
+    if (!barcode) {
+      // Find the max barcode in the collection, using the latest custom or auto barcode
+      const lastProduct = await Product.findOne({}, {}, { sort: { barcode: -1 } });
+      barcode = lastProduct && lastProduct.barcode ? lastProduct.barcode + 1 : 1;
+    }
     const product = new Product({
       ...req.body,
+      barcode,
       createdBy: req.user.userName, // Use logged-in user's username
       updatedBy: req.user.userName, // Initially same as createdBy
     });
