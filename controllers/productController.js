@@ -93,6 +93,16 @@ exports.getProductById = async (req, res) => {
   }
 };
 
+exports.getProductByBarcode = async (req, res) => {
+  try {
+    const product = await Product.findOne({ barcode: req.params.barcode });
+    if (!product) return res.status(404).json({ error: "Product not found" });
+    res.json(product);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+};
+
 // Update
 exports.updateProduct = async (req, res) => {
   try {
