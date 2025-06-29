@@ -2,7 +2,7 @@ const { MongoClient } = require("mongodb");
 require("dotenv").config();
 
 const localUri =
-  process.env.LOCAL_MONGO_URI || "mongodb://localhost:27017/localDB";
+  process.env.LOCAL_MONGO_URI;
 const dbName = process.env.LOCAL_DB_NAME || "localDB";
 const models = {
   products: require("../models/Product"),

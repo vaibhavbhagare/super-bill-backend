@@ -29,8 +29,6 @@ app.use(
   }),
 );
 
-app.set('trust proxy', true);
-
 // Apply rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -65,12 +63,15 @@ app.use((req, res) => {
 });
 
 // Database connection
+const isDev = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'local' || process.env.NODE_ENV === 'dev';
+const mongoUri = isDev ? process.env.LOCAL_MONGO_URI : process.env.MONGO_URI;
+
 mongoose
-  .connect(process.env.LOCAL_MONGO_URI, {
+  .connect(mongoUri, {
     useNewUrlParser: true,
     useUnifiedTopology: true,
   })
-  .then(() => console.log("Connected to local MongoDB: "))
+  .then(() => console.log(`Connected to MongoDB: ${mongoUri}`))
   .catch((err) => console.error("MongoDB connection error:", err));
 
 // Start server
