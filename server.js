@@ -68,7 +68,7 @@ mongoose
     useNewUrlParser: true,
     useUnifiedTopology: true,
   })
-  .then(() => console.log("Connected to local MongoDB"))
+  .then(() => console.log("Connected to local MongoDB: "))
   .catch((err) => console.error("MongoDB connection error:", err));
 
 // Start server
