@@ -14,10 +14,10 @@ const customerSchema = new mongoose.Schema(
   },
 );
 
-customerSchema.statics.markAsSynced = async function(id) {
-   const result=  await this.findByIdAndUpdate(
+customerSchema.statics.markAsSynced = async function (id) {
+  const result = await this.findByIdAndUpdate(
     { _id: id, isSynced: false },
-    { $set: { isSynced: true } }
+    { $set: { isSynced: true } },
   );
   console.log(result);
   return result;

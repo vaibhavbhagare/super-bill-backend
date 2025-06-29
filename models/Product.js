@@ -23,13 +23,13 @@ const productSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 productSchema.statics.markAsSynced = async function (id) {
-  const result=  await this.findByIdAndUpdate(
+  const result = await this.findByIdAndUpdate(
     { _id: id, isSynced: false },
-    { $set: { isSynced: true } }
+    { $set: { isSynced: true } },
   );
   console.log(result);
   return result;

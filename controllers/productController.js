@@ -9,7 +9,7 @@ exports.createProduct = async (req, res) => {
       const lastProduct = await Product.findOne(
         {},
         {},
-        { sort: { barcode: -1 } }
+        { sort: { barcode: -1 } },
       );
       barcode =
         lastProduct && lastProduct.barcode ? lastProduct.barcode + 1 : 1;

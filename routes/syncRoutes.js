@@ -15,7 +15,7 @@ router.post("/", async (req, res) => {
     res.json({
       message: "Sync complete",
       newlySynced: syncResult.newlySynced,
-      totalProcessed: syncResult.totalProcessed
+      totalProcessed: syncResult.totalProcessed,
     });
   } catch (err) {
     res.status(500).json({ error: "Sync failed", details: err.message });

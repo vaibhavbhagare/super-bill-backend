@@ -37,31 +37,31 @@ async function syncDatabases() {
       // 1. Remote → Local (sync remote docs into local first)
       const remoteDocs = await remoteCol.find({}).toArray();
       console.log(
-        `Found ${remoteDocs.length} documents in remote collection '${name}'.`
+        `Found ${remoteDocs.length} documents in remote collection '${name}'.`,
       );
       let remoteToLocalCount = 0;
       for (const doc of remoteDocs) {
         await localCol.updateOne(
           { _id: doc._id },
           { $set: doc },
-          { upsert: true }
+          { upsert: true },
         );
         remoteToLocalCount++;
         if (remoteToLocalCount % 100 === 0) {
           console.log(
-            `  [Remote→Local] Synced ${remoteToLocalCount} documents in '${name}' so far...`
+            `  [Remote→Local] Synced ${remoteToLocalCount} documents in '${name}' so far...`,
           );
         }
       }
       console.log(
-        `[Remote→Local] Finished syncing collection '${name}'. Total documents synced: ${remoteToLocalCount}`
+        `[Remote→Local] Finished syncing collection '${name}'. Total documents synced: ${remoteToLocalCount}`,
       );
 
       // 2. Local → Remote (then push local docs to remote)
       const localDocs = await localCol.find().toArray();
       totalProcessed += localDocs.length;
       console.log(
-        `Found ${localDocs.length} unsynced documents in local collection '${name}'.`
+        `Found ${localDocs.length} unsynced documents in local collection '${name}'.`,
       );
       let localToRemoteCount = 0;
       for (const doc of localDocs) {
@@ -71,7 +71,7 @@ async function syncDatabases() {
         await remoteCol.updateOne(
           { _id: doc._id },
           { $set: doc },
-          { upsert: true }
+          { upsert: true },
         );
         // Only count as newly synced if was not already synced
         // if (doc.isSynced === false) {
@@ -81,12 +81,12 @@ async function syncDatabases() {
         localToRemoteCount++;
         if (localToRemoteCount % 100 === 0) {
           console.log(
-            `  [Local→Remote] Synced ${localToRemoteCount} documents in '${name}' so far...`
+            `  [Local→Remote] Synced ${localToRemoteCount} documents in '${name}' so far...`,
           );
         }
       }
       console.log(
-        `[Local→Remote] Finished syncing collection '${name}'. Total documents synced: ${localToRemoteCount}`
+        `[Local→Remote] Finished syncing collection '${name}'. Total documents synced: ${localToRemoteCount}`,
       );
     }
 
