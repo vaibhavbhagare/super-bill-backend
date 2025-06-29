@@ -9,6 +9,7 @@ const rateLimit = require("express-rate-limit");
 const userRoutes = require("./routes/userRoutes");
 const customerRoutes = require("./routes/customerRoutes");
 const productRoutes = require("./routes/productRoutes");
+const syncRoutes = require("./routes/syncRoutes");
 
 dotenv.config();
 
@@ -43,7 +44,7 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use("/api/users", userRoutes);
 app.use("/api/customers", customerRoutes);
 app.use("/api/products", productRoutes);
-
+app.use("/api/sync", syncRoutes);
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
@@ -63,11 +64,11 @@ app.use((req, res) => {
 
 // Database connection
 mongoose
-  .connect(process.env.MONGO_URI, {
+  .connect(process.env.LOCAL_MONGO_URI, {
     useNewUrlParser: true,
     useUnifiedTopology: true,
   })
-  .then(() => console.log("Connected to MongoDB"))
+  .then(() => console.log("Connected to local MongoDB"))
   .catch((err) => console.error("MongoDB connection error:", err));
 
 // Start server

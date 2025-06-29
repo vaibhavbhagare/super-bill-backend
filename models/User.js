@@ -7,6 +7,7 @@ const userSchema = new mongoose.Schema(
     password: { type: String, required: true },
     name: { type: String, required: true },
     phoneNumber: { type: Number, required: true, unique: true },
+    isSynced: { type: Boolean, required: true },
     role: {
       type: String,
       required: true,
@@ -36,6 +37,15 @@ userSchema.methods.toJSON = function () {
   const obj = this.toObject();
   delete obj.password;
   return obj;
+};
+
+userSchema.statics.markAsSynced = async function(id) {
+   const result=  await this.findByIdAndUpdate(
+    { _id: id, isSynced: false },
+    { $set: { isSynced: true } }
+  );
+  console.log(result);
+  return result;
 };
 
 module.exports = mongoose.model("User", userSchema);

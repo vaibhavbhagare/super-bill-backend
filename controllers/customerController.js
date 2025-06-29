@@ -4,7 +4,9 @@ const whatsappService = require("../controllers/whatsappService");
 // Create
 exports.createCustomer = async (req, res) => {
   try {
-    const customer = new Customer(req.body);
+    const customer = new Customer({
+      ...req.body,
+    });
     const saved = await customer.save();
     res.status(201).json(saved);
   } catch (err) {

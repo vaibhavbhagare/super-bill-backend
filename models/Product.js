@@ -13,6 +13,7 @@ const productSchema = new mongoose.Schema(
     sellingPrice2: { type: Number, required: true },
     brand: { type: String },
     purchasePrice: { type: Number, required: true },
+    isSynced: { type: Boolean, required: true },
     unit: {
       type: String,
       enum: ["KG", "GM", "PCS", "ML", "L", "PCS", "OTHER"],
@@ -22,7 +23,16 @@ const productSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  },
+  }
 );
+
+productSchema.statics.markAsSynced = async function (id) {
+  const result=  await this.findByIdAndUpdate(
+    { _id: id, isSynced: false },
+    { $set: { isSynced: true } }
+  );
+  console.log(result);
+  return result;
+};
 
 module.exports = mongoose.model("Product", productSchema);

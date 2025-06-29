@@ -6,8 +6,13 @@ exports.createProduct = async (req, res) => {
     let barcode = req.body.barcode;
     if (!barcode) {
       // Find the max barcode in the collection, using the latest custom or auto barcode
-      const lastProduct = await Product.findOne({}, {}, { sort: { barcode: -1 } });
-      barcode = lastProduct && lastProduct.barcode ? lastProduct.barcode + 1 : 1;
+      const lastProduct = await Product.findOne(
+        {},
+        {},
+        { sort: { barcode: -1 } }
+      );
+      barcode =
+        lastProduct && lastProduct.barcode ? lastProduct.barcode + 1 : 1;
     }
     const product = new Product({
       ...req.body,
