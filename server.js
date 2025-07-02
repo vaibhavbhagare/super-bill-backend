@@ -10,6 +10,7 @@ const userRoutes = require("./routes/userRoutes");
 const customerRoutes = require("./routes/customerRoutes");
 const productRoutes = require("./routes/productRoutes");
 const syncRoutes = require("./routes/syncRoutes");
+const invoiceRoutes = require('./routes/invoiceRoutes');
 
 dotenv.config();
 
@@ -45,6 +46,7 @@ app.use("/api/users", userRoutes);
 app.use("/api/customers", customerRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/sync", syncRoutes);
+app.use('/api', invoiceRoutes);
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
@@ -53,6 +55,8 @@ app.use((err, req, res, next) => {
     code: err.code || "INTERNAL_ERROR",
   });
 });
+
+app.use('/images', express.static('images'));
 
 // 404 handler
 app.use((req, res) => {
