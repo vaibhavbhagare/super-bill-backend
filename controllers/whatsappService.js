@@ -7,7 +7,7 @@ exports.sendWhatsAppMessage = async (
   customerName,
   amount,
   phoneNumber,
-  imageUrl
+  imageUrl,
 ) => {
   try {
     const messageBody = `नमस्कार ${customerName},

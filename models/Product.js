@@ -13,7 +13,7 @@ const productSchema = new mongoose.Schema(
     sellingPrice2: { type: Number, required: true },
     brand: { type: String },
     purchasePrice: { type: Number, required: true },
-    isSynced: { type: Boolean, required: true },
+    isSynced: { type: Boolean },
     unit: {
       type: String,
       enum: ["KG", "GM", "PCS", "ML", "L", "PCS", "OTHER"],

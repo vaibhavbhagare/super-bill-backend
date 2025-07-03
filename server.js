@@ -10,7 +10,7 @@ const userRoutes = require("./routes/userRoutes");
 const customerRoutes = require("./routes/customerRoutes");
 const productRoutes = require("./routes/productRoutes");
 const syncRoutes = require("./routes/syncRoutes");
-const invoiceRoutes = require('./routes/invoiceRoutes');
+const invoiceRoutes = require("./routes/invoiceRoutes");
 
 dotenv.config();
 
@@ -46,7 +46,7 @@ app.use("/api/users", userRoutes);
 app.use("/api/customers", customerRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/sync", syncRoutes);
-app.use('/api', invoiceRoutes);
+app.use("/api", invoiceRoutes);
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
@@ -56,7 +56,7 @@ app.use((err, req, res, next) => {
   });
 });
 
-app.use('/images', express.static('images'));
+app.use("/images", express.static("images"));
 
 // 404 handler
 app.use((req, res) => {
@@ -67,7 +67,10 @@ app.use((req, res) => {
 });
 
 // Database connection
-const isDev = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'local' || process.env.NODE_ENV === 'dev';
+const isDev =
+  process.env.NODE_ENV === "development" ||
+  process.env.NODE_ENV === "local" ||
+  process.env.NODE_ENV === "dev";
 const mongoUri = isDev ? process.env.LOCAL_MONGO_URI : process.env.MONGO_URI;
 
 mongoose

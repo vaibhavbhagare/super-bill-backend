@@ -74,9 +74,9 @@ async function syncDatabases() {
           { upsert: true },
         );
         // Only count as newly synced if was not already synced
-        // if (doc.isSynced === false) {
-        //   newlySynced++;
-        // }
+        if (doc.isSynced === false) {
+          newlySynced++;
+        }
 
         localToRemoteCount++;
         if (localToRemoteCount % 100 === 0) {

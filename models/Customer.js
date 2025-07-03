@@ -6,7 +6,7 @@ const customerSchema = new mongoose.Schema(
     fullName: { type: String, required: true },
     address: { type: String, default: null },
     notepadPage: { type: String, default: null },
-    isSynced: { type: Boolean, required: true },
+    isSynced: { type: Boolean },
     createdBy: String,
   },
   {

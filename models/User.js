@@ -7,7 +7,7 @@ const userSchema = new mongoose.Schema(
     password: { type: String, required: true },
     name: { type: String, required: true },
     phoneNumber: { type: Number, required: true, unique: true },
-    isSynced: { type: Boolean, required: true },
+    isSynced: { type: Boolean },
     role: {
       type: String,
       required: true,
