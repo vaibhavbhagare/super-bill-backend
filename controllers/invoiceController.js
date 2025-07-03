@@ -41,24 +41,24 @@ exports.createInvoice = async (req, res) => {
     await invoice.save();
 
     // Send WhatsApp message if requested
-    if (sendWhatsappMessage) {
-      // Fetch customer details if only ID is provided
-      let customerData = customer;
-      if (typeof customer === 'string') {
-        customerData = await Customer.findById(customer).lean();
-      }
-      const customerName = customerData.fullName || '';
-      const phoneNumber = customerData.phoneNumber || '';
-      const totalAmount = billingSummary?.total || 0;
-      const imageUrl = 'https://content.jdmagicbox.com/comp/solapur/u7/9999px217.x217.221207222759.g8u7/catalogue/bhagare-super-market-ankoli-solapur-general-stores-9o7ehqfh88.jpg';
-      console.log(`[INVOICE] Sending WhatsApp message to ${customerName} (${phoneNumber}) for amount ₹${totalAmount}`);
-      try {
-        await whatsappService.sendWhatsAppMessage(customerName, totalAmount, phoneNumber, imageUrl);
-        console.log(`[INVOICE] WhatsApp message sent successfully to ${phoneNumber}`);
-      } catch (err) {
-        console.error(`[INVOICE] Failed to send WhatsApp message to ${phoneNumber}:`, err);
-      }
-    }
+    // if (sendWhatsappMessage) {
+    //   // Fetch customer details if only ID is provided
+    //   let customerData = customer;
+    //   if (typeof customer === 'string') {
+    //     customerData = await Customer.findById(customer).lean();
+    //   }
+    //   const customerName = customerData.fullName || '';
+    //   const phoneNumber = customerData.phoneNumber || '';
+    //   const totalAmount = billingSummary?.total || 0;
+    //   const imageUrl = 'https://content.jdmagicbox.com/comp/solapur/u7/9999px217.x217.221207222759.g8u7/catalogue/bhagare-super-market-ankoli-solapur-general-stores-9o7ehqfh88.jpg';
+    //   console.log(`[INVOICE] Sending WhatsApp message to ${customerName} (${phoneNumber}) for amount ₹${totalAmount}`);
+    //   try {
+    //     await whatsappService.sendWhatsAppMessage(customerName, totalAmount, phoneNumber, imageUrl);
+    //     console.log(`[INVOICE] WhatsApp message sent successfully to ${phoneNumber}`);
+    //   } catch (err) {
+    //     console.error(`[INVOICE] Failed to send WhatsApp message to ${phoneNumber}:`, err);
+    //   }
+    // }
 
     res.status(201).json(invoice);
   } catch (err) {
