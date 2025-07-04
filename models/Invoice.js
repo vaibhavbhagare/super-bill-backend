@@ -40,13 +40,13 @@ const invoiceSchema = new mongoose.Schema(
     invoiceNumber: { type: String, unique: true }, // optional, for tracking
     paymentStatus: {
       type: String,
-      enum: ["PAID", "UNPAID", "PARTIAL"],
+      enum: ["PAID", "UNPAID"],
       default: "PAID",
     }, // optional
     createdBy: { type: String, required: true },
     updatedBy: { type: String },
   },
-  { timestamps: true },
+  { timestamps: true }
 );
 
 module.exports = mongoose.model("Invoice", invoiceSchema);

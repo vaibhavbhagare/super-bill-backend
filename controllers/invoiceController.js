@@ -14,11 +14,32 @@ exports.createInvoice = async (req, res) => {
       billerName,
       sendWhatsappMessage,
       transactionType,
-      invoiceNumber,
       paymentStatus,
       createdBy,
       updatedBy,
     } = req.body;
+
+    // Generate invoice number: MON-INV-XXXX
+    const monthNames = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+    const now = new Date();
+    const month = monthNames[now.getMonth()];
+    const year = now.getFullYear();
+    // Find last invoice for this month
+    const monthRegex = new RegExp(`^${month}-INV-(\\d{4})$`);
+    const firstDay = new Date(year, now.getMonth(), 1);
+    const lastDay = new Date(year, now.getMonth() + 1, 0, 23, 59, 59, 999);
+    const lastInvoice = await Invoice.findOne({
+      createdAt: { $gte: firstDay, $lte: lastDay },
+      invoiceNumber: { $regex: monthRegex }
+    }).sort({ createdAt: -1 });
+    let nextNumber = 1;
+    if (lastInvoice && lastInvoice.invoiceNumber) {
+      const match = lastInvoice.invoiceNumber.match(/(\\d{4})$/);
+      if (match) {
+        nextNumber = parseInt(match[1], 10) + 1;
+      }
+    }
+    const invoiceNumber = `${month}-INV-${String(nextNumber).padStart(4, '0')}`;
 
     // Check stock for each product
     for (const item of buyingProducts) {
