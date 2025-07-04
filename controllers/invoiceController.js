@@ -19,27 +19,27 @@ exports.createInvoice = async (req, res) => {
       updatedBy,
     } = req.body;
 
-    // Generate invoice number: MON-INV-XXXX
+    // Generate invoice number: MON-INV-XXXX (e.g., JUL-INV-0023)
     const monthNames = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
     const now = new Date();
     const month = monthNames[now.getMonth()];
     const year = now.getFullYear();
-    // Find last invoice for this month
-    const monthRegex = new RegExp(`^${month}-INV-(\\d{4})$`);
-    const firstDay = new Date(year, now.getMonth(), 1);
-    const lastDay = new Date(year, now.getMonth() + 1, 0, 23, 59, 59, 999);
-    const lastInvoice = await Invoice.findOne({
-      createdAt: { $gte: firstDay, $lte: lastDay },
-      invoiceNumber: { $regex: monthRegex }
-    }).sort({ createdAt: -1 });
+    const prefix = `${month}-INV-`;
+    // Find the max invoiceNumber for this month
+    const lastInvoice = await Invoice.findOne(
+      { invoiceNumber: { $regex: `^${prefix}\\d{4}$` } },
+      {},
+      { sort: { invoiceNumber: -1 } }
+    );
     let nextNumber = 1;
     if (lastInvoice && lastInvoice.invoiceNumber) {
-      const match = lastInvoice.invoiceNumber.match(/(\\d{4})$/);
+      // const match = lastInvoice.invoiceNumber.match(/(\\d{4})$/);
+      const match = lastInvoice.invoiceNumber.match(/(\d{4})$/);  
       if (match) {
         nextNumber = parseInt(match[1], 10) + 1;
       }
     }
-    const invoiceNumber = `${month}-INV-${String(nextNumber).padStart(4, '0')}`;
+    const invoiceNumber = `${prefix}${String(nextNumber).padStart(4, '0')}`;
 
     // Check stock for each product
     for (const item of buyingProducts) {
@@ -63,43 +63,31 @@ exports.createInvoice = async (req, res) => {
       });
     }
 
-    // Create invoice
-    const invoice = new Invoice({
-      buyingProducts,
-      customer,
-      billingSummary,
-      billerId,
-      billerName,
-      sendWhatsappMessage,
-      transactionType,
-      invoiceNumber,
-      paymentStatus,
-      createdBy,
-      updatedBy,
-    });
-    await invoice.save();
-
-    // Send WhatsApp message if requested
-    // if (sendWhatsappMessage) {
-    //   // Fetch customer details if only ID is provided
-    //   let customerData = customer;
-    //   if (typeof customer === 'string') {
-    //     customerData = await Customer.findById(customer).lean();
-    //   }
-    //   const customerName = customerData.fullName || '';
-    //   const phoneNumber = customerData.phoneNumber || '';
-    //   const totalAmount = billingSummary?.total || 0;
-    //   const imageUrl = 'https://content.jdmagicbox.com/comp/solapur/u7/9999px217.x217.221207222759.g8u7/catalogue/bhagare-super-market-ankoli-solapur-general-stores-9o7ehqfh88.jpg';
-    //   console.log(`[INVOICE] Sending WhatsApp message to ${customerName} (${phoneNumber}) for amount ₹${totalAmount}`);
-    //   try {
-    //     await whatsappService.sendWhatsAppMessage(customerName, totalAmount, phoneNumber, imageUrl);
-    //     console.log(`[INVOICE] WhatsApp message sent successfully to ${phoneNumber}`);
-    //   } catch (err) {
-    //     console.error(`[INVOICE] Failed to send WhatsApp message to ${phoneNumber}:`, err);
-    //   }
-    // }
-
-    res.status(201).json(invoice);
+    // Try to create invoice
+    try {
+      const invoice = new Invoice({
+        buyingProducts,
+        customer,
+        billingSummary,
+        billerId,
+        billerName,
+        sendWhatsappMessage,
+        transactionType,
+        invoiceNumber,
+        paymentStatus,
+        createdBy,
+        updatedBy,
+      });
+      await invoice.save();
+      res.status(201).json(invoice);
+    } catch (err) {
+      if (err.code === 11000 && err.keyPattern && err.keyPattern.invoiceNumber) {
+        // Duplicate invoiceNumber, try again
+        return res.status(500).json({ error: "Failed to generate unique invoice number after multiple attempts." });
+      } else {
+        throw err;
+      }
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
