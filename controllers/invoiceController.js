@@ -20,7 +20,20 @@ exports.createInvoice = async (req, res) => {
     } = req.body;
 
     // Generate invoice number: MON-INV-XXXX (e.g., JUL-INV-0023)
-    const monthNames = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+    const monthNames = [
+      "JAN",
+      "FEB",
+      "MAR",
+      "APR",
+      "MAY",
+      "JUN",
+      "JUL",
+      "AUG",
+      "SEP",
+      "OCT",
+      "NOV",
+      "DEC",
+    ];
     const now = new Date();
     const month = monthNames[now.getMonth()];
     const year = now.getFullYear();
@@ -34,12 +47,12 @@ exports.createInvoice = async (req, res) => {
     let nextNumber = 1;
     if (lastInvoice && lastInvoice.invoiceNumber) {
       // const match = lastInvoice.invoiceNumber.match(/(\\d{4})$/);
-      const match = lastInvoice.invoiceNumber.match(/(\d{4})$/);  
+      const match = lastInvoice.invoiceNumber.match(/(\d{4})$/);
       if (match) {
         nextNumber = parseInt(match[1], 10) + 1;
       }
     }
-    const invoiceNumber = `${prefix}${String(nextNumber).padStart(4, '0')}`;
+    const invoiceNumber = `${prefix}${String(nextNumber).padStart(4, "0")}`;
 
     // Check stock for each product
     for (const item of buyingProducts) {
@@ -81,9 +94,18 @@ exports.createInvoice = async (req, res) => {
       await invoice.save();
       res.status(201).json(invoice);
     } catch (err) {
-      if (err.code === 11000 && err.keyPattern && err.keyPattern.invoiceNumber) {
+      if (
+        err.code === 11000 &&
+        err.keyPattern &&
+        err.keyPattern.invoiceNumber
+      ) {
         // Duplicate invoiceNumber, try again
-        return res.status(500).json({ error: "Failed to generate unique invoice number after multiple attempts." });
+        return res
+          .status(500)
+          .json({
+            error:
+              "Failed to generate unique invoice number after multiple attempts.",
+          });
       } else {
         throw err;
       }
@@ -98,7 +120,8 @@ exports.getInvoices = async (req, res) => {
   try {
     const invoices = await Invoice.find()
       .populate("customer")
-      .populate("buyingProducts.product");
+      .populate("buyingProducts.product")
+      .sort({ updatedAt: -1 });
     res.json(invoices);
   } catch (err) {
     res.status(500).json({ error: err.message });
