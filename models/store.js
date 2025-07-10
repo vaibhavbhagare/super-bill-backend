@@ -40,18 +40,17 @@ const storeSchema = new mongoose.Schema(
     subscription: {
       type: String,
       required: true,
-      enum: [...Array(12)].map((_, i) => String(i + 1)), // "1" to "12"
+      enum: ["bronze", "silver", "gold", "diamond"], // "1" to "12"
     },
 
     createdBy: {
       type: String,
-      
     },
     updatedBy: {
       type: String,
     },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 module.exports = mongoose.model("Store", storeSchema);

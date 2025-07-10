@@ -42,7 +42,7 @@ exports.createInvoice = async (req, res) => {
     const lastInvoice = await Invoice.findOne(
       { invoiceNumber: { $regex: `^${prefix}\\d{4}$` } },
       {},
-      { sort: { invoiceNumber: -1 } }
+      { sort: { invoiceNumber: -1 } },
     );
     let nextNumber = 1;
     if (lastInvoice && lastInvoice.invoiceNumber) {
@@ -100,12 +100,10 @@ exports.createInvoice = async (req, res) => {
         err.keyPattern.invoiceNumber
       ) {
         // Duplicate invoiceNumber, try again
-        return res
-          .status(500)
-          .json({
-            error:
-              "Failed to generate unique invoice number after multiple attempts.",
-          });
+        return res.status(500).json({
+          error:
+            "Failed to generate unique invoice number after multiple attempts.",
+        });
       } else {
         throw err;
       }

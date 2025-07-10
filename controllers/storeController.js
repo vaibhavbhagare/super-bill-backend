@@ -3,7 +3,10 @@ const Store = require("../models/store");
 // 🔽 Create Store
 exports.createStore = async (req, res) => {
   try {
-    const store = await Store.create({ ...req.body, createdBy: req.user.userName });
+    const store = await Store.create({
+      ...req.body,
+      createdBy: req.user.userName,
+    });
     res.status(201).json(store);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -37,7 +40,7 @@ exports.updateStore = async (req, res) => {
     const store = await Store.findByIdAndUpdate(
       req.params.id,
       { ...req.body, updatedBy: req.body.updatedBy },
-      { new: true }
+      { new: true },
     );
     if (!store) return res.status(404).json({ error: "Store not found" });
     res.json(store);
