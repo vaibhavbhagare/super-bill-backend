@@ -9,7 +9,7 @@ exports.createProduct = async (req, res) => {
       const lastProduct = await Product.findOne(
         {},
         {},
-        { sort: { barcode: -1 } },
+        { sort: { barcode: -1 } }
       );
       barcode =
         lastProduct && lastProduct.barcode ? lastProduct.barcode + 1 : 1;
@@ -50,7 +50,7 @@ exports.getProducts = async (req, res) => {
 
     // ✅ Build search filter
     const filter = {};
-    if (req.query.search) {
+    if (req?.query?.search) {
       const searchRegex = new RegExp(req.query.search, "i");
       filter.$or = [
         { name: { $regex: searchRegex } },
@@ -67,6 +67,15 @@ exports.getProducts = async (req, res) => {
           $expr: {
             $regexMatch: {
               input: { $toString: "$searchKey" },
+              regex: req.query.search,
+              options: "i",
+            },
+          },
+        },
+        {
+          $expr: {
+            $regexMatch: {
+              input: { $toString: "$barcode" },
               regex: req.query.search,
               options: "i",
             },
