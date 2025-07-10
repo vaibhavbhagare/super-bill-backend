@@ -46,7 +46,7 @@ const invoiceSchema = new mongoose.Schema(
     createdBy: { type: String, required: true },
     updatedBy: { type: String },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 module.exports = mongoose.model("Invoice", invoiceSchema);
