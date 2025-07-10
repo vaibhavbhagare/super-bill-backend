@@ -58,6 +58,7 @@ exports.getProducts = async (req, res) => {
           $expr: {
             $regexMatch: {
               input: { $toString: "$secondName" },
+               input: { $toString: "$searchKey" },
               regex: req.query.search,
               options: "i",
             },
