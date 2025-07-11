@@ -160,59 +160,84 @@ exports.getInvoices = async (req, res) => {
 
     // ✅ Build search filter
     const filter = {};
-    if (req?.query?.search) {
+
+    // Date range filter
+    if (req.query.startDate || req.query.endDate) {
+      filter.createdAt = {};
+      if (req.query.startDate) {
+        filter.createdAt.$gte = new Date(req.query.startDate);
+      }
+      if (req.query.endDate) {
+        // Set end date to end of the day
+        const endDate = new Date(req.query.endDate);
+        endDate.setHours(23, 59, 59, 999);
+        filter.createdAt.$lte = endDate;
+      }
+    }
+
+    // Payment method (transactionType) filter
+    if (req.query.paymentMethod) {
+      filter.transactionType = req.query.paymentMethod;
+    }
+
+    // Payment status filter
+    if (req.query.paymentStatus) {
+      filter.paymentStatus = req.query.paymentStatus;
+    }
+
+    // Biller name filter
+    if (req.query.billerName) {
+      filter.billerName = new RegExp(req.query.billerName, 'i');
+    }
+
+    // Text search across multiple fields
+    if (req.query.search) {
       const searchRegex = new RegExp(req.query.search, "i");
       filter.$or = [
-        { name: { $regex: searchRegex } },
-        {
-          $expr: {
-            $regexMatch: {
-              input: { $toString: "$secondName" },
-              regex: req.query.search,
-              options: "i",
-            },
-          },
-        },
-        {
-          $expr: {
-            $regexMatch: {
-              input: { $toString: "$searchKey" },
-              regex: req.query.search,
-              options: "i",
-            },
-          },
-        },
-        {
-          $expr: {
-            $regexMatch: {
-              input: { $toString: "$barcode" },
-              regex: req.query.search,
-              options: "i",
-            },
-          },
-        },
+        { invoiceNumber: { $regex: searchRegex } },
+        { billerName: { $regex: searchRegex } }
       ];
     }
-    const sort = { updatedAt: -1 };
+
+    // Customer name filter - need to use aggregation for this
+    let invoiceQuery = Invoice.find(filter);
+    
+    if (req.query.customerName) {
+      // First populate customer to search by name
+      invoiceQuery = invoiceQuery.populate({
+        path: 'customer',
+        match: { fullName: new RegExp(req.query.customerName, 'i') }
+      });
+    } else {
+      // Regular population without filtering
+      invoiceQuery = invoiceQuery.populate('customer');
+    }
+
+    // Always populate products
+    invoiceQuery = invoiceQuery.populate('buyingProducts.product');
+
+    // Apply sorting, skip and limit
+    const sort = { createdAt: -1 }; // Sort by newest first
     const [invoices, total] = await Promise.all([
-      Invoice.find(filter)
-        .populate("customer")
-        .populate("buyingProducts.product")
-        .sort(sort)
-        .skip(skip)
-        .limit(limit), // Apply skip & limit!
-      Invoice.countDocuments(filter),
+      invoiceQuery.sort(sort).skip(skip).limit(limit),
+      Invoice.countDocuments(filter)
     ]);
 
-    console.log("✅ invoices returned:", invoices.length);
+    // If customerName filter was applied, filter out null customers
+    let filteredInvoices = invoices;
+    if (req.query.customerName) {
+      filteredInvoices = invoices.filter(invoice => invoice.customer);
+    }
+
+    console.log("✅ Invoices returned:", filteredInvoices.length);
 
     // ✅ Send response
     res.status(200).json({
-      data: invoices,
-      total,
+      data: filteredInvoices,
+      total: req.query.customerName ? filteredInvoices.length : total,
       page,
       limit,
-      totalPages: Math.ceil(total / limit),
+      totalPages: Math.ceil((req.query.customerName ? filteredInvoices.length : total) / limit)
     });
   } catch (err) {
     console.error("❌ Error in getInvoices:", err.message);
