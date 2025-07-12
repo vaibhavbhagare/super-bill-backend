@@ -1,11 +1,10 @@
 // MongoDB sync script
-// Replace <user> and <pass> in MONGO_URI in your .env file with your actual MongoDB Atlas credentials
 const { MongoClient } = require("mongodb");
 require("dotenv").config();
 const { ObjectId } = require("mongodb");
 const { markDocumentAsSynced } = require("./services/syncService");
 const localUri = process.env.LOCAL_MONGO_URI;
-const remoteUri = process.env.MONGO_URI;
+const remoteUri = process.env.REMOTE_MONGO_URI;
 const localDbName = process.env.LOCAL_DB_NAME;
 const remoteDbName = process.env.REMOTE_DB_NAME;
 
