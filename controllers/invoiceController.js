@@ -36,8 +36,9 @@ exports.createInvoice = async (req, res) => {
     ];
     const now = new Date();
     const month = monthNames[now.getMonth()];
-    const year = now.getFullYear();
-    const prefix = `${month}-INV-`;
+    const billerShortName = billerName.slice(0, 3).toUpperCase()|| "INV";
+
+    const prefix = `${month}-${billerShortName}-`;
     // Find the max invoiceNumber for this month
     const lastInvoice = await Invoice.findOne(
       { invoiceNumber: { $regex: `^${prefix}\\d{4}$` } },
