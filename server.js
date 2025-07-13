@@ -12,6 +12,8 @@ const productRoutes = require("./routes/productRoutes");
 const syncRoutes = require("./routes/syncRoutes");
 const invoiceRoutes = require("./routes/invoiceRoutes");
 const storeRoutes = require("./routes/stroreRoutes");
+const reportRoutes = require("./routes/reportRoutes");
+
 dotenv.config();
 
 const app = express();
@@ -33,7 +35,7 @@ app.use(
 // Apply rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
+  max: 500, // limit each IP to 100 requests per windowMs
 });
 app.use(limiter);
 
@@ -48,6 +50,8 @@ app.use("/api/products", productRoutes);
 app.use("/api/sync", syncRoutes);
 app.use("/api", invoiceRoutes);
 app.use("/api/stores", storeRoutes);
+app.use('/api/reports', reportRoutes);
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
@@ -73,7 +77,6 @@ const isDev =
   process.env.NODE_ENV === "local" ||
   process.env.NODE_ENV === "dev";
 const mongoUri = isDev ? process.env.LOCAL_MONGO_URI : process.env.REMOTE_MONGO_URI;
-
 mongoose
   .connect(mongoUri, {
     useNewUrlParser: true,
