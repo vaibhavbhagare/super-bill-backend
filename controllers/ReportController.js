@@ -1,81 +1,71 @@
-const Invoice = require('../models/Invoice');
-const Product = require('../models/Product');
+const Invoice = require("../models/Invoice");
 
 exports.getReport = async (req, res) => {
-    console.log("called")
   try {
-    const { customerId, billerId, startDate, endDate } = req.query;
-    const match = {};
+    let { customerId, billerId, startDate, endDate } = req.query;
 
-    if (customerId) match['customer'] = customerId;
-    if (billerId) match['billerId'] = billerId;
-    if (startDate || endDate) {
-      match['createdAt'] = {};
-      if (startDate) match['createdAt'].$gte = new Date(startDate);
-      if (endDate) {
-        const end = new Date(endDate);
-        end.setHours(23, 59, 59, 999);
-        match['createdAt'].$lte = end;
+    const today = new Date();
+    const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+
+    // Normalize start & end dates to cover the **entire** day range
+    const start = startDate ? new Date(startDate) : firstDayOfMonth;
+    start.setHours(0, 0, 0, 0); // 00:00:00.000 of the start day
+
+    const end = endDate ? new Date(endDate) : today;
+    end.setHours(23, 59, 59, 999); // 23:59:59.999 of the end day
+
+    // Build filter object
+    const filter = {
+      createdAt: { $gte: start, $lte: end },
+    };
+
+    if (customerId) filter.customer = customerId;
+    if (billerId) filter.billerId = billerId;
+
+    const invoices = await Invoice.find(filter).populate(
+      "buyingProducts.product"
+    );
+
+    let totalSales = 0;
+    let totalProfit = 0;
+    const salesByDate = {};
+
+    for (const invoice of invoices) {
+      for (const item of invoice.buyingProducts) {
+        const sellingPrice = item.price;
+        console.log("price", sellingPrice);
+        const quantity = item.quantity;
+        const subtotal = sellingPrice * quantity;
+
+        const product = item.product;
+        const purchasePrice = product?.purchasePrice || 0;
+        console.log("purchasePrice", purchasePrice);
+        const profit = (sellingPrice - purchasePrice) * quantity;
+        console.log("profit", profit);
+        totalSales += subtotal;
+        totalProfit += profit;
       }
+
+      const dateKey = invoice.createdAt.toISOString().split("T")[0];
+      if (!salesByDate[dateKey]) salesByDate[dateKey] = 0;
+
+      const invoiceTotal = invoice.billingSummary?.total || 0;
+      salesByDate[dateKey] += invoiceTotal;
     }
 
-    // 1. Summary
-    const summaryAgg = await Invoice.aggregate([
-      { $match: match },
-      {
-        $group: {
-          _id: null,
-          totalSales: { $sum: '$billingSummary.total' },
-          totalProfit: { $sum: { $subtract: ['$billingSummary.total', '$billingSummary.subtotal'] } },
-          totalOrders: { $sum: 1 }
-        }
-      }
-    ]);
-    const summary = summaryAgg[0] || { totalSales: 0, totalProfit: 0, totalOrders: 0 };
+    const salesTrend = Object.entries(salesByDate)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, sales]) => ({ date, sales }));
 
-    // 2. Sales Trend (by day)
-    const salesTrend = await Invoice.aggregate([
-      { $match: match },
-      {
-        $group: {
-          _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
-          sales: { $sum: "$billingSummary.total" }
-        }
-      },
-      { $sort: { "_id": 1 } }
-    ]).then(res => res.map(r => ({ date: r._id, sales: r.sales })));
+    const summary = {
+      totalSales,
+      totalProfit,
+      totalOrders: invoices.length,
+    };
 
-    // 3. Category Sales
-    const categorySales = await Invoice.aggregate([
-      { $match: match },
-      { $unwind: "$buyingProducts" },
-      {
-        $lookup: {
-          from: "products",
-          localField: "buyingProducts.product",
-          foreignField: "_id",
-          as: "productInfo"
-        }
-      },
-      { $unwind: "$productInfo" },
-      {
-        $group: {
-          _id: "$productInfo.category",
-          sales: { $sum: "$buyingProducts.price" }
-        }
-      }
-    ]).then(res => res.map(r => ({ category: r._id, sales: r.sales })));
-
-    // 4. Low Stock
-    const lowStock = await Product.find({ stock: { $lte: 5 } }, { name: 1, stock: 1 });
-
-    res.json({
-      summary,
-      salesTrend,
-      categorySales,
-      lowStock: lowStock.map(p => ({ product: p.name, stock: p.stock }))
-    });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
+    return res.json({ summary, salesTrend });
+  } catch (error) {
+    console.error("Error generating report:", error);
+    res.status(500).json({ message: "Internal server error" });
   }
 };
