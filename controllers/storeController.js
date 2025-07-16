@@ -3,15 +3,25 @@ const Store = require("../models/store");
 // 🔽 Create Store
 exports.createStore = async (req, res) => {
   try {
+    if (!req.user || !req.user.userName) {
+      return res.status(401).json({ error: "Unauthorized: User not logged in" });
+    }
+
     const store = await Store.create({
       ...req.body,
       createdBy: req.user.userName,
     });
-    res.status(201).json(store);
+
+    return res.status(201).json({
+      message: "Store created successfully",
+      data: store,
+    });
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    console.error("Store creation error:", err.message);
+    return res.status(400).json({ error: err.message || "Failed to create store" });
   }
 };
+
 
 // 🔍 Get All Stores
 exports.getStores = async (req, res) => {

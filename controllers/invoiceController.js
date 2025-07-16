@@ -36,7 +36,7 @@ exports.createInvoice = async (req, res) => {
     ];
     const now = new Date();
     const month = monthNames[now.getMonth()];
-    const billerShortName = billerName.slice(0, 3).toUpperCase()|| "INV";
+    const billerShortName = billerName.slice(0, 3).toUpperCase() || "INV";
 
     const prefix = `${month}-${billerShortName}-`;
     // Find the max invoiceNumber for this month
@@ -63,19 +63,24 @@ exports.createInvoice = async (req, res) => {
           .status(404)
           .json({ error: `Product not found: ${item.product}` });
       }
-      if (product.stock < item.quantity) {
-        return res
-          .status(400)
-          .json({ error: `Insufficient stock for product: ${product.name}` });
-      }
-    }
+      // 👇 Convert to numbers to avoid string math bugs
+      const currentStock = Number(product.stock || 0);
+      const orderedQty = Number(item.quantity || 0);
 
-    // Decrement stock
-    for (const item of buyingProducts) {
-      await Product.findByIdAndUpdate(item.product, {
-        $inc: { stock: -item.quantity },
-      });
+      
+      const newStock =
+        currentStock >= orderedQty
+          ? currentStock - orderedQty 
+          : 0; 
+
+     
+
+      await Product.updateOne(
+        { _id: product._id },
+        { $set: { stock: newStock } }
+      );
     }
+    // Decrement stock
 
     // Try to create invoice
     try {
@@ -188,7 +193,7 @@ exports.getInvoices = async (req, res) => {
 
     // Biller name filter
     if (req.query.billerName) {
-      filter.billerName = new RegExp(req.query.billerName, 'i');
+      filter.billerName = new RegExp(req.query.billerName, "i");
     }
 
     // Text search across multiple fields
@@ -196,38 +201,38 @@ exports.getInvoices = async (req, res) => {
       const searchRegex = new RegExp(req.query.search, "i");
       filter.$or = [
         { invoiceNumber: { $regex: searchRegex } },
-        { billerName: { $regex: searchRegex } }
+        { billerName: { $regex: searchRegex } },
       ];
     }
 
     // Customer name filter - need to use aggregation for this
     let invoiceQuery = Invoice.find(filter);
-    
+
     if (req.query.customerName) {
       // First populate customer to search by name
       invoiceQuery = invoiceQuery.populate({
-        path: 'customer',
-        match: { fullName: new RegExp(req.query.customerName, 'i') }
+        path: "customer",
+        match: { fullName: new RegExp(req.query.customerName, "i") },
       });
     } else {
       // Regular population without filtering
-      invoiceQuery = invoiceQuery.populate('customer');
+      invoiceQuery = invoiceQuery.populate("customer");
     }
 
     // Always populate products
-    invoiceQuery = invoiceQuery.populate('buyingProducts.product');
+    invoiceQuery = invoiceQuery.populate("buyingProducts.product");
 
     // Apply sorting, skip and limit
     const sort = { createdAt: -1 }; // Sort by newest first
     const [invoices, total] = await Promise.all([
       invoiceQuery.sort(sort).skip(skip).limit(limit),
-      Invoice.countDocuments(filter)
+      Invoice.countDocuments(filter),
     ]);
 
     // If customerName filter was applied, filter out null customers
     let filteredInvoices = invoices;
     if (req.query.customerName) {
-      filteredInvoices = invoices.filter(invoice => invoice.customer);
+      filteredInvoices = invoices.filter((invoice) => invoice.customer);
     }
 
     console.log("✅ Invoices returned:", filteredInvoices.length);
@@ -238,7 +243,9 @@ exports.getInvoices = async (req, res) => {
       total: req.query.customerName ? filteredInvoices.length : total,
       page,
       limit,
-      totalPages: Math.ceil((req.query.customerName ? filteredInvoices.length : total) / limit)
+      totalPages: Math.ceil(
+        (req.query.customerName ? filteredInvoices.length : total) / limit
+      ),
     });
   } catch (err) {
     console.error("❌ Error in getInvoices:", err.message);
