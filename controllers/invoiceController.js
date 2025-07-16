@@ -67,22 +67,17 @@ exports.createInvoice = async (req, res) => {
       const currentStock = Number(product.stock || 0);
       const orderedQty = Number(item.quantity || 0);
 
-      // 👇 Calculate new stock safely
+      
       const newStock =
         currentStock >= orderedQty
-          ? currentStock - orderedQty // Stock is enough → subtract
-          : 0; // Stock is less → set to 0
-      const oversoldQty = Math.max(orderedQty - currentStock, 0);
+          ? currentStock - orderedQty 
+          : 0; 
 
-      // 👇 Optional logging for debugging
-      console.log(
-        `🧾 Product: ${product.name}, Stock Before: ${currentStock}, Ordered: ${orderedQty}, Stock After: ${newStock}`
-      );
+     
 
-      // 👇 Update DB
       await Product.updateOne(
         { _id: product._id },
-        { $set: { stock: oversoldQty } }
+        { $set: { stock: newStock } }
       );
     }
     // Decrement stock
