@@ -1,5 +1,5 @@
 const Product = require("../models/Product");
-
+const { Parser } = require("json2csv");
 // Create
 exports.createProduct = async (req, res) => {
   try {
@@ -163,6 +163,47 @@ exports.deleteProduct = async (req, res) => {
       deletedAt: new Date(),
     });
   } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+};
+
+exports.exportCsv = async (req, res) => {
+  try {
+    // Fetch products from DB
+    const products = await Product.find().lean();
+    const formatDate = (iso) =>
+      iso ? new Date(iso).toLocaleDateString("en-GB") : "";
+    // Inject running Sr No.
+    const productsWithSr = products.map((p, idx) => ({
+      srNo: idx + 1,
+      expiryDate: formatDate(p.expiryDate), // <-- dd/mm/yyyy
+      ...p,
+    }));
+
+    // Define CSV columns
+    const fields = [
+      { label: "Sr No.", value: "srNo" },
+      { label: "Barcode", value: "barcode" },
+      { label: "Name", value: "name" },
+      { label: "Second Name", value: "secondName" },
+      { label: "Stock", value: "stock" },
+      { label: "Available Stock", value: "" },
+      { label: "Purchase Price", value: "purchasePrice" },
+      { label: "MRP", value: "mrp" },
+      { label: "Selling Price 1", value: "sellingPrice1" },
+      { label: "Expiry Date", value: "expiryDate" },
+    ];
+
+    const parser = new Parser({ fields, withBOM: true });
+    const csv = parser.parse(productsWithSr);
+
+    res
+      .status(200)
+      .header("Content-Type", "text/csv")
+      .attachment("products.csv")
+      .send(csv);
+  } catch (err) {
+    console.error("CSV export failed:", err);
     res.status(400).json({ error: err.message });
   }
 };
