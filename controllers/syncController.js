@@ -101,14 +101,34 @@ exports.syncCollections = async (req, res) => {
         // 1. Get last sync time
         const lastSync = await getLastSync(dbLocal, col);
 
-        // 2. Get changes since last sync
+        // 2. Get changes since last sync **and** any docs that are missing on the opposite side.
+        //    This guarantees we also catch documents that existed *before* lastSync but failed to
+        //    sync for some reason (the root cause of the empty change sets you observed).
+
+        // Fetch just the _ids to build quick lookup sets (memory-efficient for typical collection sizes).
+        const remoteIdsArr = await dbRemote.collection(col).distinct("_id");
+        const localIdsArr = await dbLocal.collection(col).distinct("_id");
+
+        // Local changes: updated recently OR completely absent on remote.
         const localChanges = await dbLocal
           .collection(col)
-          .find({ updatedAt: { $gt: lastSync } })
+          .find({
+            $or: [
+              { updatedAt: { $gt: lastSync } },
+              { _id: { $nin: remoteIdsArr } },
+            ],
+          })
           .toArray();
+
+        // Remote changes: updated recently OR completely absent on local.
         const remoteChanges = await dbRemote
           .collection(col)
-          .find({ updatedAt: { $gt: lastSync } })
+          .find({
+            $or: [
+              { updatedAt: { $gt: lastSync } },
+              { _id: { $nin: localIdsArr } },
+            ],
+          })
           .toArray();
 
         // 3. Merge local changes to remote
@@ -134,20 +154,25 @@ exports.syncCollections = async (req, res) => {
         // 5. Optionally, handle deletions (soft delete)
         // Already handled above: if a doc is deleted (has deletedAt), it will be synced
 
-        // 6. Update last sync time
-        const now = new Date();
-        await setLastSync(dbLocal, col, now);
-        await setLastSync(dbRemote, col, now);
-
-        // 7. Return updated counts
+        // 6. Return updated counts *before* deciding whether to persist the new lastSync
         const localCount = await dbLocal.collection(col).countDocuments({ deletedAt: { $exists: false } });
         const remoteCount = await dbRemote.collection(col).countDocuments({ deletedAt: { $exists: false } });
+
+        // 7. Only advance the lastSync timestamp if the two collections are now in sync.
+        //    This avoids skipping documents whose `updatedAt` precedes an erroneously
+        //    recorded `lastSync` (the main reason `localChanges` / `remoteChanges` were empty).
+        let now = null;
+        if (localCount === remoteCount) {
+          now = new Date();
+          await setLastSync(dbLocal, col, now);
+          await setLastSync(dbRemote, col, now);
+        }
 
         results.push({
           collection: col,
           localCount,
           remoteCount,
-          lastSync: now,
+          lastSync: now, // may be null if collections still differ
         });
       } catch (err) {
         results.push({
