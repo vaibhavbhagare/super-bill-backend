@@ -58,13 +58,61 @@ exports.getSyncStatus = async (req, res) => {
     for (const col of collections) {
       const localCount = await dbLocal.collection(col).countDocuments({ deletedAt: { $exists: false } });
       const remoteCount = await dbRemote.collection(col).countDocuments({ deletedAt: { $exists: false } });
+
+      // Count soft-deleted docs as well
+      const localDeleted = await dbLocal.collection(col).countDocuments({ deletedAt: { $exists: true } });
+      const remoteDeleted = await dbRemote.collection(col).countDocuments({ deletedAt: { $exists: true } });
       const meta = await dbLocal.collection("sync_meta").findOne({ collection: col });
       result.push({
         collection: col,
         localCount,
         remoteCount,
+        localDeleted,
+        remoteDeleted,
         lastSync: meta?.lastSync || null,
       });
+    }
+
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  } finally {
+    if (localClient) await localClient.close();
+    if (remoteClient) await remoteClient.close();
+  }
+};
+
+
+// DELETE /api/sync/purge-deleted
+// Hard delete all documents that have a deletedAt flag
+exports.purgeDeletedRecords = async (req, res) => {
+  const { collection } = req.body; // optional single collection
+  let localClient, remoteClient;
+  try {
+    localClient = await MongoClient.connect(LOCAL_URI);
+    remoteClient = await MongoClient.connect(REMOTE_URI);
+
+    const dbLocal = localClient.db(localDbName);
+    const dbRemote = remoteClient.db(remoteDbName);
+
+    const collections = collection ? [collection] : await getUserCollections(dbLocal);
+
+    const result = [];
+    for (const col of collections) {
+      try {
+        const localDelRes = await dbLocal.collection(col).deleteMany({ deletedAt: { $exists: true } });
+        const remoteDelRes = await dbRemote.collection(col).deleteMany({ deletedAt: { $exists: true } });
+        result.push({
+          collection: col,
+          localDeletedRemoved: localDelRes.deletedCount,
+          remoteDeletedRemoved: remoteDelRes.deletedCount,
+        });
+      } catch (err) {
+        result.push({
+          collection: col,
+          error: err.message,
+        });
+      }
     }
 
     res.json(result);

@@ -19,11 +19,15 @@ const userSchema = new mongoose.Schema(
       enum: ["en", "mr", "hi"],
     },
     updatedBy: String,
+    deletedAt: { type: Date, default: null },
+    deletedBy: { type: String },
   },
   {
     timestamps: true,
   },
 );
+
+userSchema.index({ deletedAt: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 30 });
 
 userSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next();
@@ -46,6 +50,20 @@ userSchema.statics.markAsSynced = async function (id) {
   );
   console.log(result);
   return result;
+};
+
+userSchema.statics.softDelete = async function (id, deletedBy) {
+  return this.findByIdAndUpdate(
+    id,
+    {
+      $set: {
+        deletedAt: new Date(),
+        deletedBy,
+        updatedAt: new Date(),
+      },
+    },
+    { new: true },
+  );
 };
 
 module.exports = mongoose.model("User", userSchema);

@@ -22,11 +22,31 @@ const productSchema = new mongoose.Schema(
     },
     createdBy: { type: String, required: true },
     updatedBy: { type: String },
+    deletedAt: { type: Date, default: null },
+    deletedBy: { type: String },
   },
   {
     timestamps: true,
   }
 );
+
+// TTL index to fully remove documents some time after deletion (e.g., 30 days)
+productSchema.index({ deletedAt: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 30 });
+
+// Soft-delete helper
+productSchema.statics.softDelete = async function (id, deletedBy) {
+  return this.findByIdAndUpdate(
+    id,
+    {
+      $set: {
+        deletedAt: new Date(),
+        deletedBy,
+        updatedAt: new Date(),
+      },
+    },
+    { new: true },
+  );
+};
 
 productSchema.statics.markAsSynced = async function (id) {
   const result = await this.findByIdAndUpdate(

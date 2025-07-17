@@ -148,7 +148,10 @@ exports.updateInvoice = async (req, res) => {
 // Delete invoice (soft delete recommended)
 exports.deleteInvoice = async (req, res) => {
   try {
-    const invoice = await Invoice.findByIdAndDelete(req.params.id);
+    const invoice = await Invoice.softDelete(
+      req.params.id,
+      req.user?.userName || "system",
+    );
     if (!invoice) return res.status(404).json({ error: "Invoice not found" });
     res.json({ message: "Invoice deleted" });
   } catch (err) {
@@ -165,7 +168,7 @@ exports.getInvoices = async (req, res) => {
     const skip = (page - 1) * limit;
 
     // ✅ Build search filter
-    const filter = {};
+    const filter = { deletedAt: { $exists: false } };
 
     // Date range filter
     if (req.query.startDate || req.query.endDate) {
