@@ -51,7 +51,10 @@ exports.getProducts = async (req, res) => {
     // ✅ Build search filter
     const filter = {};
     // Exclude soft-deleted products
-    filter.deletedAt = { $exists: false };
+    filter.deletedAt = {$or: [
+    { deletedAt: { $exists: false } },
+    { deletedAt: null }
+  ] };
     if (req?.query?.search) {
       const searchRegex = new RegExp(req.query.search, "i");
       filter.$or = [

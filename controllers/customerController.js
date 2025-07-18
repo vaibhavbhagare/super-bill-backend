@@ -23,7 +23,10 @@ exports.getCustomers = async (req, res) => {
     const skip = (page - 1) * limit;
 
     // Search logic: search on fullName and phoneNumber
-    const filter = { deletedAt: { $exists: false } };
+    const filter = {  $or: [
+    { deletedAt: { $exists: false } },
+    { deletedAt: null }
+  ] };
     if (req.query.search) {
       const searchRegex = new RegExp(req.query.search, "i");
       filter.$or = [

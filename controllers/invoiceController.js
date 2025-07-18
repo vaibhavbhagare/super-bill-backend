@@ -168,7 +168,10 @@ exports.getInvoices = async (req, res) => {
     const skip = (page - 1) * limit;
 
     // ✅ Build search filter
-    const filter = { deletedAt: { $exists: false } };
+    const filter = { $or: [
+    { deletedAt: { $exists: false } },
+    { deletedAt: null }
+  ] };
 
     // Date range filter
     if (req.query.startDate || req.query.endDate) {

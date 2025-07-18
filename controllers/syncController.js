@@ -18,7 +18,7 @@ const LOCAL_URI = process.env.LOCAL_MONGO_URI;
 const REMOTE_URI = process.env.REMOTE_MONGO_URI;
 const localDbName = process.env.LOCAL_DB_NAME;
 const remoteDbName = process.env.REMOTE_DB_NAME; // Use your DB name
- 
+
 // Helper: get last sync time for a collection
 async function getLastSync(db, collection) {
   const meta = await db.collection("sync_meta").findOne({ collection });
@@ -27,11 +27,9 @@ async function getLastSync(db, collection) {
 
 // Helper: set last sync time for a collection
 async function setLastSync(db, collection, time) {
-  await db.collection("sync_meta").updateOne(
-    { collection },
-    { $set: { lastSync: time } },
-    { upsert: true }
-  );
+  await db
+    .collection("sync_meta")
+    .updateOne({ collection }, { $set: { lastSync: time } }, { upsert: true });
 }
 
 // Helper: get all collections except system/meta
@@ -56,13 +54,23 @@ exports.getSyncStatus = async (req, res) => {
 
     const result = [];
     for (const col of collections) {
-      const localCount = await dbLocal.collection(col).countDocuments({ deletedAt: { $exists: false } });
-      const remoteCount = await dbRemote.collection(col).countDocuments({ deletedAt: { $exists: false } });
+      const localCount = await dbLocal.collection(col).countDocuments({
+        $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
+      });
+      const remoteCount = await dbRemote.collection(col).countDocuments({
+        $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
+      });
 
-      // Count soft-deleted docs as well
-      const localDeleted = await dbLocal.collection(col).countDocuments({ deletedAt: { $exists: true } });
-      const remoteDeleted = await dbRemote.collection(col).countDocuments({ deletedAt: { $exists: true } });
-      const meta = await dbLocal.collection("sync_meta").findOne({ collection: col });
+      // Count soft-deleted docs (deletedAt set to a non-null date)
+      const localDeleted = await dbLocal
+        .collection(col)
+        .countDocuments({ deletedAt: { $exists: true, $ne: null } });
+      const remoteDeleted = await dbRemote
+        .collection(col)
+        .countDocuments({ deletedAt: { $exists: true, $ne: null } });
+      const meta = await dbLocal
+        .collection("sync_meta")
+        .findOne({ collection: col });
       result.push({
         collection: col,
         localCount,
@@ -82,7 +90,6 @@ exports.getSyncStatus = async (req, res) => {
   }
 };
 
-
 // DELETE /api/sync/purge-deleted
 // Hard delete all documents that have a deletedAt flag
 exports.purgeDeletedRecords = async (req, res) => {
@@ -95,13 +102,19 @@ exports.purgeDeletedRecords = async (req, res) => {
     const dbLocal = localClient.db(localDbName);
     const dbRemote = remoteClient.db(remoteDbName);
 
-    const collections = collection ? [collection] : await getUserCollections(dbLocal);
+    const collections = collection
+      ? [collection]
+      : await getUserCollections(dbLocal);
 
     const result = [];
     for (const col of collections) {
       try {
-        const localDelRes = await dbLocal.collection(col).deleteMany({ deletedAt: { $exists: true } });
-        const remoteDelRes = await dbRemote.collection(col).deleteMany({ deletedAt: { $exists: true } });
+        const localDelRes = await dbLocal
+          .collection(col)
+          .deleteMany({ deletedAt: { $exists: true, $ne: null } });
+        const remoteDelRes = await dbRemote
+          .collection(col)
+          .deleteMany({ deletedAt: { $exists: true, $ne: null } });
         result.push({
           collection: col,
           localDeletedRemoved: localDelRes.deletedCount,
@@ -125,7 +138,7 @@ exports.purgeDeletedRecords = async (req, res) => {
 };
 
 // POST /api/sync
-exports.syncCollections = async (req, res) => {
+exports.syncCollections = async (req, res) => {``
   const { collection } = req.body;
   let localClient, remoteClient;
   try {
@@ -181,8 +194,10 @@ exports.syncCollections = async (req, res) => {
 
         // 3. Merge local changes to remote
         for (const doc of localChanges) {
-          const remoteDoc = await dbRemote.collection(col).findOne({ _id: doc._id });
-          if (!remoteDoc || (doc.updatedAt > remoteDoc.updatedAt)) {
+          const remoteDoc = await dbRemote
+            .collection(col)
+            .findOne({ _id: doc._id });
+          if (!remoteDoc || doc.updatedAt > remoteDoc.updatedAt) {
             await dbRemote
               .collection(col)
               .updateOne({ _id: doc._id }, { $set: doc }, { upsert: true });
@@ -191,8 +206,10 @@ exports.syncCollections = async (req, res) => {
 
         // 4. Merge remote changes to local
         for (const doc of remoteChanges) {
-          const localDoc = await dbLocal.collection(col).findOne({ _id: doc._id });
-          if (!localDoc || (doc.updatedAt > localDoc.updatedAt)) {
+          const localDoc = await dbLocal
+            .collection(col)
+            .findOne({ _id: doc._id });
+          if (!localDoc || doc.updatedAt > localDoc.updatedAt) {
             await dbLocal
               .collection(col)
               .updateOne({ _id: doc._id }, { $set: doc }, { upsert: true });
@@ -203,8 +220,9 @@ exports.syncCollections = async (req, res) => {
         // Already handled above: if a doc is deleted (has deletedAt), it will be synced
 
         // 6. Return updated counts *before* deciding whether to persist the new lastSync
-        const localCount = await dbLocal.collection(col).countDocuments({ deletedAt: { $exists: false } });
-        const remoteCount = await dbRemote.collection(col).countDocuments({ deletedAt: { $exists: false } });
+        const activeFilter = { $or: [ { deletedAt: { $exists: false } }, { deletedAt: null } ] };
+        const localCount = await dbLocal.collection(col).countDocuments(activeFilter);
+        const remoteCount = await dbRemote.collection(col).countDocuments(activeFilter);
 
         // 7. Only advance the lastSync timestamp if the two collections are now in sync.
         //    This avoids skipping documents whose `updatedAt` precedes an erroneously
