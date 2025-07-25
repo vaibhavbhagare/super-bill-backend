@@ -40,24 +40,24 @@ exports.getProducts = async (req, res) => {
 };
 */
 }
-
 exports.getProducts = async (req, res) => {
   try {
-    // ✅ Parse and validate page and limit
     const page = Number(req.query.page) > 0 ? Number(req.query.page) : 1;
     const limit = Number(req.query.limit) > 0 ? Number(req.query.limit) : 10;
     const skip = (page - 1) * limit;
 
-    // ✅ Build search filter
     const filter = {};
-    // Exclude soft-deleted products
-    filter.deletedAt = {$or: [
-    { deletedAt: { $exists: false } },
-    { deletedAt: null }
-  ] };
+
+    // Create $or array with deletedAt check
+    const orConditions = [
+      { deletedAt: { $exists: false } },
+      { deletedAt: null }
+    ];
+
+    // Add search conditions
     if (req?.query?.search) {
       const searchRegex = new RegExp(req.query.search, "i");
-      filter.$or = [
+      orConditions.push(
         { name: { $regex: searchRegex } },
         {
           $expr: {
@@ -85,18 +85,19 @@ exports.getProducts = async (req, res) => {
               options: "i",
             },
           },
-        },
-      ];
+        }
+      );
     }
+
+    // Assign the merged $or filter
+    filter.$or = orConditions;
+
     const sort = { updatedAt: -1 };
     const [products, total] = await Promise.all([
-      Product.find(filter).sort(sort).skip(skip).limit(limit), // Apply skip & limit!
+      Product.find(filter).sort(sort).skip(skip).limit(limit),
       Product.countDocuments(filter),
     ]);
 
-    console.log("✅ Products returned:", products.length);
-
-    // ✅ Send response
     res.status(200).json({
       data: products,
       total,
@@ -109,6 +110,76 @@ exports.getProducts = async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 };
+
+
+// exports.getProducts = async (req, res) => {
+//   try {
+//     // ✅ Parse and validate page and limit
+//     const page = Number(req.query.page) > 0 ? Number(req.query.page) : 1;
+//     const limit = Number(req.query.limit) > 0 ? Number(req.query.limit) : 10;
+//     const skip = (page - 1) * limit;
+
+//     // ✅ Build search filter
+//     const filter = {};
+//     // Exclude soft-deleted products
+//     filter.deletedAt = {$or: [
+//     { deletedAt: { $exists: false } },
+//     { deletedAt: null }
+//   ] };
+//     if (req?.query?.search) {
+//       const searchRegex = new RegExp(req.query.search, "i");
+//       filter.$or = [
+//         { name: { $regex: searchRegex } },
+//         {
+//           $expr: {
+//             $regexMatch: {
+//               input: { $toString: "$secondName" },
+//               regex: req.query.search,
+//               options: "i",
+//             },
+//           },
+//         },
+//         {
+//           $expr: {
+//             $regexMatch: {
+//               input: { $toString: "$searchKey" },
+//               regex: req.query.search,
+//               options: "i",
+//             },
+//           },
+//         },
+//         {
+//           $expr: {
+//             $regexMatch: {
+//               input: { $toString: "$barcode" },
+//               regex: req.query.search,
+//               options: "i",
+//             },
+//           },
+//         },
+//       ];
+//     }
+//     const sort = { updatedAt: -1 };
+//     const [products, total] = await Promise.all([
+//       Product.find(filter).sort(sort).skip(skip).limit(limit), // Apply skip & limit!
+//       Product.countDocuments(filter),
+//     ]);
+
+//     console.log("✅ Products returned:", products.length);
+
+//     // ✅ Send response
+//     res.status(200).json({
+//       data: products,
+//       total,
+//       page,
+//       limit,
+//       totalPages: Math.ceil(total / limit),
+//     });
+//   } catch (err) {
+//     console.error("❌ Error in getProducts:", err.message);
+//     res.status(500).json({ error: "Server error" });
+//   }
+// };
 
 // Read one
 exports.getProductById = async (req, res) => {
