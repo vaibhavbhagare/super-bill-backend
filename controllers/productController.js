@@ -5,14 +5,10 @@ exports.createProduct = async (req, res) => {
   try {
     let barcode = req.body.barcode;
     if (!barcode) {
-      // Find the max barcode in the collection, using the latest custom or auto barcode
-      const lastProduct = await Product.findOne(
-        {},
-        {},
-        { sort: { barcode: -1 } }
-      );
-      barcode =
-        lastProduct && lastProduct.barcode ? lastProduct.barcode + 1 : 1;
+      const timestamp = Date.now().toString().slice(-7);
+      const random = Math.floor(100 + Math.random() * 900);
+      barcode = timestamp + random;
+
     }
     const product = new Product({
       ...req.body,
@@ -27,20 +23,6 @@ exports.createProduct = async (req, res) => {
   }
 };
 
-// Read all
-{
-  /*
-exports.getProducts = async (req, res) => {
-  try {
-    const products = await Product.find();
-    res.json(products);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-};
-*/
-}
-
 exports.getProducts = async (req, res) => {
   try {
     // ✅ Parse and validate page and limit
@@ -52,9 +34,9 @@ exports.getProducts = async (req, res) => {
     const filter = {};
     // Exclude soft-deleted products
     filter.$or = [
-  { deletedAt: { $exists: false } },
-  { deletedAt: null }
-];
+      { deletedAt: { $exists: false } },
+      { deletedAt: null }
+    ];
     if (req?.query?.search) {
       const searchRegex = new RegExp(req.query.search, "i");
       filter.$or = [
