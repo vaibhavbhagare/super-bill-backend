@@ -5,14 +5,10 @@ exports.createProduct = async (req, res) => {
   try {
     let barcode = req.body.barcode;
     if (!barcode) {
-      // Find the max barcode in the collection, using the latest custom or auto barcode
-      const lastProduct = await Product.findOne(
-        {},
-        {},
-        { sort: { barcode: -1 } }
-      );
-      barcode =
-        lastProduct && lastProduct.barcode ? lastProduct.barcode + 1 : 1;
+      const timestamp = Date.now().toString().slice(-7);
+      const random = Math.floor(100 + Math.random() * 900);
+      barcode = timestamp + random;
+
     }
     const product = new Product({
       ...req.body,
@@ -27,6 +23,7 @@ exports.createProduct = async (req, res) => {
   }
 };
 
+<<<<<<< HEAD
 // Read all
 {
   /*
@@ -40,6 +37,8 @@ exports.getProducts = async (req, res) => {
 };
 */
 }
+=======
+>>>>>>> 83b3e3cac52a6ad130f3ade69338630fe3fedb48
 exports.getProducts = async (req, res) => {
   try {
     const page = Number(req.query.page) > 0 ? Number(req.query.page) : 1;
@@ -47,6 +46,7 @@ exports.getProducts = async (req, res) => {
     const skip = (page - 1) * limit;
 
     const filter = {};
+<<<<<<< HEAD
 
     // Create $or array with deletedAt check
     const orConditions = [
@@ -55,6 +55,13 @@ exports.getProducts = async (req, res) => {
     ];
 
     // Add search conditions
+=======
+    // Exclude soft-deleted products
+    filter.$or = [
+      { deletedAt: { $exists: false } },
+      { deletedAt: null }
+    ];
+>>>>>>> 83b3e3cac52a6ad130f3ade69338630fe3fedb48
     if (req?.query?.search) {
       const searchRegex = new RegExp(req.query.search, "i");
       orConditions.push(
