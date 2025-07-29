@@ -33,7 +33,10 @@ exports.loginUser = async (req, res) => {
     }
 
     // Find user by userName
-    const user = await User.findOne({ userName });
+    const user = await User.findOne({ userName, $or: [
+    { deletedAt: { $exists: false } },
+    { deletedAt: null }
+  ] });
     if (!user) {
       return res.status(401).json({
         error: "Invalid credentials",
@@ -191,7 +194,10 @@ exports.getUsers = async (req, res) => {
     const skip = (page - 1) * limit;
 
     // ✅ Build search filter
-    const filter = {};
+    const filter = { $or: [
+    { deletedAt: { $exists: false } },
+    { deletedAt: null }
+  ] };
     if (req.query.search) {
       const searchRegex = new RegExp(req.query.search, "i");
       filter.$or = [
@@ -277,7 +283,10 @@ exports.updateUser = async (req, res) => {
 // Delete user (protected route)
 exports.deleteUser = async (req, res) => {
   try {
-    const deleted = await User.findByIdAndDelete(req.params.id);
+    const deleted = await User.softDelete(
+      req.params.id,
+      req.user?.userName || "system",
+    );
     if (!deleted)
       return res.status(404).json({
         error: "User not found",

@@ -23,7 +23,10 @@ exports.getCustomers = async (req, res) => {
     const skip = (page - 1) * limit;
 
     // Search logic: search on fullName and phoneNumber
-    const filter = {};
+    const filter = {  $or: [
+    { deletedAt: { $exists: false } },
+    { deletedAt: null }
+  ] };
     if (req.query.search) {
       const searchRegex = new RegExp(req.query.search, "i");
       filter.$or = [
@@ -91,7 +94,10 @@ exports.updateCustomer = async (req, res) => {
 // Delete
 exports.deleteCustomer = async (req, res) => {
   try {
-    const deleted = await Customer.findByIdAndDelete(req.params.id);
+    const deleted = await Customer.softDelete(
+      req.params.id,
+      req.user?.userName || "system",
+    );
     if (!deleted) return res.status(404).json({ error: "Customer not found" });
     res.json({ message: "Customer deleted" });
   } catch (err) {

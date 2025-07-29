@@ -50,6 +50,11 @@ exports.getProducts = async (req, res) => {
 
     // ✅ Build search filter
     const filter = {};
+    // Exclude soft-deleted products
+    filter.deletedAt = {$or: [
+    { deletedAt: { $exists: false } },
+    { deletedAt: null }
+  ] };
     if (req?.query?.search) {
       const searchRegex = new RegExp(req.query.search, "i");
       filter.$or = [
@@ -156,7 +161,10 @@ exports.deleteProduct = async (req, res) => {
     // You might want to store deletion information in a separate collection
     console.log(`Product ${product.name} deleted by ${req.user.userName}`);
 
-    const deleted = await Product.findByIdAndDelete(req.params.id);
+    const deleted = await Product.softDelete(
+      req.params.id,
+      req.user?.userName || "system",
+    );
     res.json({
       message: "Product deleted",
       deletedBy: req.user.userName,

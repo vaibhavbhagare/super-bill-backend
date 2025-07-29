@@ -8,11 +8,29 @@ const customerSchema = new mongoose.Schema(
     notepadPage: { type: String, default: null },
     isSynced: { type: Boolean },
     createdBy: String,
+    deletedAt: { type: Date, default: null },
+    deletedBy: { type: String },
   },
   {
     timestamps: true,
   },
 );
+
+customerSchema.index({ deletedAt: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 30 });
+
+customerSchema.statics.softDelete = async function (id, deletedBy) {
+  return this.findByIdAndUpdate(
+    id,
+    {
+      $set: {
+        deletedAt: new Date(),
+        deletedBy,
+        updatedAt: new Date(),
+      },
+    },
+    { new: true },
+  );
+};
 
 customerSchema.statics.markAsSynced = async function (id) {
   const result = await this.findByIdAndUpdate(

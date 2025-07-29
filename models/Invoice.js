@@ -45,8 +45,26 @@ const invoiceSchema = new mongoose.Schema(
     }, // optional
     createdBy: { type: String, required: true },
     updatedBy: { type: String },
+    deletedAt: { type: Date, default: null },
+    deletedBy: { type: String },
   },
   { timestamps: true },
 );
+
+invoiceSchema.index({ deletedAt: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 30 });
+
+invoiceSchema.statics.softDelete = async function (id, deletedBy) {
+  return this.findByIdAndUpdate(
+    id,
+    {
+      $set: {
+        deletedAt: new Date(),
+        deletedBy,
+        updatedAt: new Date(),
+      },
+    },
+    { new: true },
+  );
+};
 
 module.exports = mongoose.model("Invoice", invoiceSchema);
