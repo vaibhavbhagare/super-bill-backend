@@ -37,7 +37,6 @@ exports.getProducts = async (req, res) => {
       { deletedAt: { $exists: false } },
       { deletedAt: null }
     ];
- 
     if (req?.query?.search) {
       const searchRegex = new RegExp(req.query.search, "i");
       filter.$or = [
