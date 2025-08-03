@@ -67,13 +67,8 @@ exports.createInvoice = async (req, res) => {
       const currentStock = Number(product.stock || 0);
       const orderedQty = Number(item.quantity || 0);
 
-      
       const newStock =
-        currentStock >= orderedQty
-          ? currentStock - orderedQty 
-          : 0; 
-
-     
+        currentStock >= orderedQty ? currentStock - orderedQty : 0;
 
       await Product.updateOne(
         { _id: product._id },
@@ -98,6 +93,14 @@ exports.createInvoice = async (req, res) => {
         updatedBy,
       });
       await invoice.save();
+
+      const customerData = await Customer.findById(customer);
+
+      if (!customerData) {
+        return res.status(404).json({ error: "Customer not found" });
+      }
+      whatsappService.sendTextMessage(invoice, customerData);
+
       res.status(201).json(invoice);
     } catch (err) {
       if (
@@ -150,7 +153,7 @@ exports.deleteInvoice = async (req, res) => {
   try {
     const invoice = await Invoice.softDelete(
       req.params.id,
-      req.user?.userName || "system",
+      req.user?.userName || "system"
     );
     if (!invoice) return res.status(404).json({ error: "Invoice not found" });
     res.json({ message: "Invoice deleted" });
@@ -168,10 +171,9 @@ exports.getInvoices = async (req, res) => {
     const skip = (page - 1) * limit;
 
     // ✅ Build search filter
-    const filter = { $or: [
-    { deletedAt: { $exists: false } },
-    { deletedAt: null }
-  ] };
+    const filter = {
+      $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
+    };
 
     // Date range filter
     if (req.query.startDate || req.query.endDate) {
