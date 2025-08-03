@@ -18,6 +18,7 @@ const userSchema = new mongoose.Schema(
       required: true,
       enum: ["en", "mr", "hi"],
     },
+    baseSalary: { type: Number, required: true },
     updatedBy: String,
     deletedAt: { type: Date, default: null },
     deletedBy: { type: String },
