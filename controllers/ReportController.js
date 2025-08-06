@@ -33,15 +33,12 @@ exports.getReport = async (req, res) => {
     for (const invoice of invoices) {
       for (const item of invoice.buyingProducts) {
         const sellingPrice = item.price;
-        console.log("price", sellingPrice);
         const quantity = item.quantity;
         const subtotal = sellingPrice * quantity;
 
         const product = item.product;
         const purchasePrice = product?.purchasePrice || 0;
-        console.log("purchasePrice", purchasePrice);
-        const profit = (sellingPrice - purchasePrice) * quantity;
-        console.log("profit", profit);
+        const profit = purchasePrice ? (sellingPrice - purchasePrice) * quantity : 0;
         totalSales += subtotal;
         totalProfit += profit;
       }
@@ -67,5 +64,46 @@ exports.getReport = async (req, res) => {
   } catch (error) {
     console.error("Error generating report:", error);
     res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.getProductStatsReport = async (req, res) => {
+  try {
+    const today = new Date();
+    const notSoldSince = daysAgo(NOT_SOLD_DAYS);
+
+    const expiredProducts = await Product.find({
+      expiryDate: { $lt: today },
+      deletedAt: null,
+    }).select('_id name stock expiryDate');
+
+    const lowStockProducts = await Product.find({
+      stock: { $lt: LOW_STOCK_THRESHOLD },
+      deletedAt: null,
+    }).select('_id name stock');
+
+    const notSoldProducts = await Product.find({
+      updatedAt: { $lt: notSoldSince },
+      deletedAt: null,
+    }).select('_id name stock updatedAt');
+
+    res.json({
+      expired: {
+        count: expiredProducts.length,
+        products: expiredProducts,
+      },
+      lowStock: {
+        count: lowStockProducts.length,
+        products: lowStockProducts,
+      },
+      notSoldRecently: {
+        since: NOT_SOLD_DAYS + ' days ago',
+        count: notSoldProducts.length,
+        products: notSoldProducts,
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching product stats:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 };
