@@ -4,13 +4,33 @@ const whatsappService = require("../controllers/whatsappService");
 // Create
 exports.createCustomer = async (req, res) => {
   try {
-    const customer = new Customer({
-      ...req.body,
-    });
+    const customer = new Customer({ ...req.body });
     const saved = await customer.save();
-    res.status(201).json(saved);
+    return res.status(201).json(saved);
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    // Check for duplicate key error
+    if (err.code === 11000 && err.keyPattern && err.keyPattern.phoneNumber) {
+      try {
+        const existingCustomer = await Customer.findOne({
+          phoneNumber: req.body.phoneNumber,
+        });
+
+          const customerWithFlag = {
+        ...existingCustomer.toObject(),
+        isExisting: true,
+      };
+
+    if (customerWithFlag) {
+          return res.status(200).json(customerWithFlag); // 👈 Return the existing customer
+        } else {
+          return res.status(404).json({ error: "Customer not found" });
+        }
+      } catch (findErr) {
+        return res.status(500).json({ error: "Error retrieving existing customer" });
+      }
+    }
+
+    return res.status(400).json({ error: err.message });
   }
 };
 
