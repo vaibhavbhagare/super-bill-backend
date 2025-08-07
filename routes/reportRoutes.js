@@ -7,5 +7,6 @@ const { auth } = require("../middleware/auth");
 router.use(auth);
 
 router.get('/', ReportController.getReport);
+router.get('/product-stats', ReportController.getProductStatsReport);
 
 module.exports = router;
