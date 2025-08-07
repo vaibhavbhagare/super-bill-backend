@@ -67,13 +67,8 @@ exports.createInvoice = async (req, res) => {
       const currentStock = Number(product.stock || 0);
       const orderedQty = Number(item.quantity || 0);
 
-      
       const newStock =
-        currentStock >= orderedQty
-          ? currentStock - orderedQty 
-          : 0; 
-
-     
+        currentStock >= orderedQty ? currentStock - orderedQty : 0;
 
       await Product.updateOne(
         { _id: product._id },
@@ -98,6 +93,14 @@ exports.createInvoice = async (req, res) => {
         updatedBy,
       });
       await invoice.save();
+
+      const customerData = await Customer.findById(customer);
+
+      if (!customerData) {
+        return res.status(404).json({ error: "Customer not found" });
+      }
+      whatsappService.sendTextMessage(invoice, customerData);
+
       res.status(201).json(invoice);
     } catch (err) {
       if (
@@ -150,7 +153,7 @@ exports.deleteInvoice = async (req, res) => {
   try {
     const invoice = await Invoice.softDelete(
       req.params.id,
-      req.user?.userName || "system",
+      req.user?.userName || "system"
     );
     if (!invoice) return res.status(404).json({ error: "Invoice not found" });
     res.json({ message: "Invoice deleted" });
@@ -168,10 +171,9 @@ exports.getInvoices = async (req, res) => {
     const skip = (page - 1) * limit;
 
     // ✅ Build search filter
-    const filter = { $or: [
-    { deletedAt: { $exists: false } },
-    { deletedAt: null }
-  ] };
+    const filter = {
+      $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
+    };
 
     // Date range filter
     if (req.query.startDate || req.query.endDate) {
@@ -202,31 +204,20 @@ exports.getInvoices = async (req, res) => {
       filter.billerName = new RegExp(req.query.billerName, "i");
     }
 
-    // Text search across multiple fields
-    if (req.query.search) {
-      const searchRegex = new RegExp(req.query.search, "i");
-      filter.$or = [
-        { invoiceNumber: { $regex: searchRegex } },
-        { billerName: { $regex: searchRegex } },
-      ];
+    // User filter (creator)
+    if (req.query.billerId) {
+      filter.billerId = req.query.billerId;
     }
 
-    // Customer name filter - need to use aggregation for this
-    let invoiceQuery = Invoice.find(filter);
-
-    if (req.query.customerName) {
-      // First populate customer to search by name
-      invoiceQuery = invoiceQuery.populate({
-        path: "customer",
-        match: { fullName: new RegExp(req.query.customerName, "i") },
-      });
-    } else {
-      // Regular population without filtering
-      invoiceQuery = invoiceQuery.populate("customer");
+    // Customer filter (by _id)
+    if (req.query.customer) {
+      filter.customer = req.query.customer;
     }
-
-    // Always populate products
-    invoiceQuery = invoiceQuery.populate("buyingProducts.product");
+    console.log(filter);
+    // Remove customerName filter and related population logic
+    let invoiceQuery = Invoice.find(filter)
+      .populate("customer")
+      .populate("buyingProducts.product");
 
     // Apply sorting, skip and limit
     const sort = { createdAt: -1 }; // Sort by newest first
