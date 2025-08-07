@@ -21,7 +21,7 @@ const SalarySchema = new mongoose.Schema(
     paidAt: { type: Date },
     remarks: String,
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 SalarySchema.index({ user: 1, month: 1 }, { unique: true }); // Prevent duplicate salary for user/month

@@ -43,7 +43,7 @@ exports.createInvoice = async (req, res) => {
     const lastInvoice = await Invoice.findOne(
       { invoiceNumber: { $regex: `^${prefix}\\d{4}$` } },
       {},
-      { sort: { invoiceNumber: -1 } }
+      { sort: { invoiceNumber: -1 } },
     );
     let nextNumber = 1;
     if (lastInvoice && lastInvoice.invoiceNumber) {
@@ -72,7 +72,7 @@ exports.createInvoice = async (req, res) => {
 
       await Product.updateOne(
         { _id: product._id },
-        { $set: { stock: newStock } }
+        { $set: { stock: newStock } },
       );
     }
     // Decrement stock
@@ -153,7 +153,7 @@ exports.deleteInvoice = async (req, res) => {
   try {
     const invoice = await Invoice.softDelete(
       req.params.id,
-      req.user?.userName || "system"
+      req.user?.userName || "system",
     );
     if (!invoice) return res.status(404).json({ error: "Invoice not found" });
     res.json({ message: "Invoice deleted" });
@@ -241,7 +241,7 @@ exports.getInvoices = async (req, res) => {
       page,
       limit,
       totalPages: Math.ceil(
-        (req.query.customerName ? filteredInvoices.length : total) / limit
+        (req.query.customerName ? filteredInvoices.length : total) / limit,
       ),
     });
   } catch (err) {

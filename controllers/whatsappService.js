@@ -8,7 +8,7 @@ exports.sendWhatsAppMessage = async (
   customerName,
   amount,
   phoneNumber,
-  imageUrl
+  imageUrl,
 ) => {
   try {
     const messageBody = `नमस्कार ${customerName},
@@ -36,7 +36,7 @@ exports.sendWhatsAppMessage = async (
 exports.sendTextMessage = async (invoice, customer) => {
   try {
     console.log(generateMarathiInvoiceParams(invoice, customer));
-    
+
     const response = await axios({
       url: "https://graph.facebook.com/v22.0/708120182383703/messages",
       method: "post",
@@ -125,14 +125,14 @@ function generateMarathiInvoiceParams(invoice, customer) {
   const billNo =
     invoice.invoiceNumber || invoice._id.toString().slice(-6).toUpperCase();
   const customerName = customer.fullName || "ग्राहक";
-const productLength = invoice.buyingProducts.length;
+  const productLength = invoice.buyingProducts.length;
 
-const productLines = invoice.buyingProducts
-  .map((item) => {
-    const qtyUnit = item.quantity + (item.unit || " नग");
-    return `${item.secondName || item.name} (${qtyUnit}) - ₹${item.price}`;
-  })
-  .join(invoice.buyingProducts.length > 1 ? ", " : "");
+  const productLines = invoice.buyingProducts
+    .map((item) => {
+      const qtyUnit = item.quantity + (item.unit || " नग");
+      return `${item.secondName || item.name} (${qtyUnit}) - ₹${item.price}`;
+    })
+    .join(invoice.buyingProducts.length > 1 ? ", " : "");
 
   const {
     subtotal = 0,
@@ -155,7 +155,7 @@ const productLines = invoice.buyingProducts
     { type: "text", text: `₹${subtotal}` }, // {{5}} एकूण रक्कम
     { type: "text", text: `₹${discount}` }, // {{6}} सवलत
     { type: "text", text: `₹${total}` }, // {{7}} देय रक्कम
-    { type: "text", text: paymentMethod }, // {{8}} पेमेंट प्रकार 
+    { type: "text", text: paymentMethod }, // {{8}} पेमेंट प्रकार
     { type: "text", text: customerName }, // {{8}} पेमेंट प्रकार
   ];
 }

@@ -25,7 +25,7 @@ const userSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 userSchema.index({ deletedAt: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 30 });
@@ -47,7 +47,7 @@ userSchema.methods.toJSON = function () {
 userSchema.statics.markAsSynced = async function (id) {
   const result = await this.findByIdAndUpdate(
     { _id: id, isSynced: false },
-    { $set: { isSynced: true } }
+    { $set: { isSynced: true } },
   );
   console.log(result);
   return result;
@@ -63,7 +63,7 @@ userSchema.statics.softDelete = async function (id, deletedBy) {
         updatedAt: new Date(),
       },
     },
-    { new: true }
+    { new: true },
   );
 };
 

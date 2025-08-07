@@ -23,7 +23,7 @@ exports.getReport = async (req, res) => {
     if (billerId) filter.billerId = billerId;
 
     const invoices = await Invoice.find(filter).populate(
-      "buyingProducts.product"
+      "buyingProducts.product",
     );
 
     let totalSales = 0;
@@ -38,7 +38,9 @@ exports.getReport = async (req, res) => {
 
         const product = item.product;
         const purchasePrice = product?.purchasePrice || 0;
-        const profit = purchasePrice ? (sellingPrice - purchasePrice) * quantity : 0;
+        const profit = purchasePrice
+          ? (sellingPrice - purchasePrice) * quantity
+          : 0;
         totalSales += subtotal;
         totalProfit += profit;
       }
@@ -75,17 +77,17 @@ exports.getProductStatsReport = async (req, res) => {
     const expiredProducts = await Product.find({
       expiryDate: { $lt: today },
       deletedAt: null,
-    }).select('_id name stock expiryDate');
+    }).select("_id name stock expiryDate");
 
     const lowStockProducts = await Product.find({
       stock: { $lt: LOW_STOCK_THRESHOLD },
       deletedAt: null,
-    }).select('_id name stock');
+    }).select("_id name stock");
 
     const notSoldProducts = await Product.find({
       updatedAt: { $lt: notSoldSince },
       deletedAt: null,
-    }).select('_id name stock updatedAt');
+    }).select("_id name stock updatedAt");
 
     res.json({
       expired: {
@@ -97,13 +99,13 @@ exports.getProductStatsReport = async (req, res) => {
         products: lowStockProducts,
       },
       notSoldRecently: {
-        since: NOT_SOLD_DAYS + ' days ago',
+        since: NOT_SOLD_DAYS + " days ago",
         count: notSoldProducts.length,
         products: notSoldProducts,
       },
     });
   } catch (error) {
-    console.error('Error fetching product stats:', error);
-    res.status(500).json({ error: 'Internal Server Error' });
+    console.error("Error fetching product stats:", error);
+    res.status(500).json({ error: "Internal Server Error" });
   }
 };

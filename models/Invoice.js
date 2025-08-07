@@ -51,7 +51,10 @@ const invoiceSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
-invoiceSchema.index({ deletedAt: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 30 });
+invoiceSchema.index(
+  { deletedAt: 1 },
+  { expireAfterSeconds: 60 * 60 * 24 * 30 },
+);
 
 invoiceSchema.statics.softDelete = async function (id, deletedBy) {
   return this.findByIdAndUpdate(

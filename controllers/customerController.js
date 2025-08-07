@@ -15,18 +15,20 @@ exports.createCustomer = async (req, res) => {
           phoneNumber: req.body.phoneNumber,
         });
 
-          const customerWithFlag = {
-        ...existingCustomer.toObject(),
-        isExisting: true,
-      };
+        const customerWithFlag = {
+          ...existingCustomer.toObject(),
+          isExisting: true,
+        };
 
-    if (customerWithFlag) {
+        if (customerWithFlag) {
           return res.status(200).json(customerWithFlag); // 👈 Return the existing customer
         } else {
           return res.status(404).json({ error: "Customer not found" });
         }
       } catch (findErr) {
-        return res.status(500).json({ error: "Error retrieving existing customer" });
+        return res
+          .status(500)
+          .json({ error: "Error retrieving existing customer" });
       }
     }
 
@@ -43,10 +45,9 @@ exports.getCustomers = async (req, res) => {
     const skip = (page - 1) * limit;
 
     // Search logic: search on fullName and phoneNumber
-    const filter = {  $or: [
-    { deletedAt: { $exists: false } },
-    { deletedAt: null }
-  ] };
+    const filter = {
+      $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
+    };
     if (req.query.search) {
       const searchRegex = new RegExp(req.query.search, "i");
       filter.$or = [
