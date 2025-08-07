@@ -52,7 +52,7 @@ app.use("/api/products", productRoutes);
 app.use("/api/sync", syncRoutes);
 app.use("/api", invoiceRoutes);
 app.use("/api/stores", storeRoutes);
-app.use('/api/reports', reportRoutes);
+app.use("/api/reports", reportRoutes);
 app.use("/api/attendance", attendanceRoutes);
 app.use("/api/salary", salaryRoutes);
 
@@ -80,7 +80,9 @@ const isDev =
   process.env.NODE_ENV === "development" ||
   process.env.NODE_ENV === "local" ||
   process.env.NODE_ENV === "dev";
-const mongoUri = isDev ? process.env.LOCAL_MONGO_URI : process.env.REMOTE_MONGO_URI;
+const mongoUri = isDev
+  ? process.env.LOCAL_MONGO_URI
+  : process.env.REMOTE_MONGO_URI;
 mongoose
   .connect(mongoUri, {
     useNewUrlParser: true,

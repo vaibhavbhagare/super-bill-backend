@@ -33,10 +33,10 @@ exports.loginUser = async (req, res) => {
     }
 
     // Find user by userName
-    const user = await User.findOne({ userName, $or: [
-    { deletedAt: { $exists: false } },
-    { deletedAt: null }
-  ] });
+    const user = await User.findOne({
+      userName,
+      $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
+    });
     if (!user) {
       return res.status(401).json({
         error: "Invalid credentials",
@@ -194,10 +194,9 @@ exports.getUsers = async (req, res) => {
     const skip = (page - 1) * limit;
 
     // ✅ Build search filter
-    const filter = { $or: [
-    { deletedAt: { $exists: false } },
-    { deletedAt: null }
-  ] };
+    const filter = {
+      $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
+    };
     if (req.query.search) {
       const searchRegex = new RegExp(req.query.search, "i");
       filter.$or = [

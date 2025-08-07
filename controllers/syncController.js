@@ -138,7 +138,8 @@ exports.purgeDeletedRecords = async (req, res) => {
 };
 
 // POST /api/sync
-exports.syncCollections = async (req, res) => {``
+exports.syncCollections = async (req, res) => {
+  ``;
   const { collection } = req.body;
   let localClient, remoteClient;
   try {
@@ -220,9 +221,15 @@ exports.syncCollections = async (req, res) => {``
         // Already handled above: if a doc is deleted (has deletedAt), it will be synced
 
         // 6. Return updated counts *before* deciding whether to persist the new lastSync
-        const activeFilter = { $or: [ { deletedAt: { $exists: false } }, { deletedAt: null } ] };
-        const localCount = await dbLocal.collection(col).countDocuments(activeFilter);
-        const remoteCount = await dbRemote.collection(col).countDocuments(activeFilter);
+        const activeFilter = {
+          $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
+        };
+        const localCount = await dbLocal
+          .collection(col)
+          .countDocuments(activeFilter);
+        const remoteCount = await dbRemote
+          .collection(col)
+          .countDocuments(activeFilter);
 
         // 7. Only advance the lastSync timestamp if the two collections are now in sync.
         //    This avoids skipping documents whose `updatedAt` precedes an erroneously

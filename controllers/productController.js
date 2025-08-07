@@ -8,7 +8,6 @@ exports.createProduct = async (req, res) => {
       const timestamp = Date.now().toString().slice(-7);
       const random = Math.floor(100 + Math.random() * 900);
       barcode = timestamp + random;
-
     }
     const product = new Product({
       ...req.body,
@@ -33,10 +32,7 @@ exports.getProducts = async (req, res) => {
     // ✅ Build search filter
     const filter = {};
     // Exclude soft-deleted products
-    filter.$or = [
-      { deletedAt: { $exists: false } },
-      { deletedAt: null }
-    ];
+    filter.$or = [{ deletedAt: { $exists: false } }, { deletedAt: null }];
     if (req?.query?.search) {
       const searchRegex = new RegExp(req.query.search, "i");
       filter.$or = [
