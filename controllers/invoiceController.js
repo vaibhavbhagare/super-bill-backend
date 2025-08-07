@@ -204,31 +204,20 @@ exports.getInvoices = async (req, res) => {
       filter.billerName = new RegExp(req.query.billerName, "i");
     }
 
-    // Text search across multiple fields
-    if (req.query.search) {
-      const searchRegex = new RegExp(req.query.search, "i");
-      filter.$or = [
-        { invoiceNumber: { $regex: searchRegex } },
-        { billerName: { $regex: searchRegex } },
-      ];
+    // User filter (creator)
+    if (req.query.billerId) {
+      filter.billerId = req.query.billerId;
     }
 
-    // Customer name filter - need to use aggregation for this
-    let invoiceQuery = Invoice.find(filter);
-
-    if (req.query.customerName) {
-      // First populate customer to search by name
-      invoiceQuery = invoiceQuery.populate({
-        path: "customer",
-        match: { fullName: new RegExp(req.query.customerName, "i") },
-      });
-    } else {
-      // Regular population without filtering
-      invoiceQuery = invoiceQuery.populate("customer");
+    // Customer filter (by _id)
+    if (req.query.customer) {
+      filter.customer = req.query.customer;
     }
-
-    // Always populate products
-    invoiceQuery = invoiceQuery.populate("buyingProducts.product");
+    console.log(filter);
+    // Remove customerName filter and related population logic
+    let invoiceQuery = Invoice.find(filter)
+      .populate("customer")
+      .populate("buyingProducts.product");
 
     // Apply sorting, skip and limit
     const sort = { createdAt: -1 }; // Sort by newest first
