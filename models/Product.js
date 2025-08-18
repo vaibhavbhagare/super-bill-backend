@@ -24,6 +24,7 @@ const productSchema = new mongoose.Schema(
     updatedBy: { type: String },
     deletedAt: { type: Date, default: null },
     deletedBy: { type: String },
+    hasImage: { type: Boolean }
   },
   {
     timestamps: true,
