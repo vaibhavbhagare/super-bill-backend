@@ -57,7 +57,6 @@ productSchema.statics.markAsSynced = async function (id) {
     { _id: id, isSynced: false },
     { $set: { isSynced: true } },
   );
-  console.log(result);
   return result;
 };
 
