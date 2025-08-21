@@ -1,4 +1,6 @@
 const Invoice = require("../models/Invoice");
+const Product = require("../models/Product");
+
 
 exports.getReport = async (req, res) => {
   try {
@@ -69,25 +71,85 @@ exports.getReport = async (req, res) => {
   }
 };
 
+
+// exports.getProductStatsReport = async (req, res) => {
+//   try {
+//     const today = new Date();
+//     const notSoldSince = daysAgo(NOT_SOLD_DAYS);
+
+//     const expiredProducts = await Product.find({
+//       expiryDate: { $lt: today },
+//       deletedAt: null,
+//     }).select("_id name stock expiryDate");
+
+//     const lowStockProducts = await Product.find({
+//       stock: { $lt: LOW_STOCK_THRESHOLD },
+//       deletedAt: null,
+//     }).select("_id name stock");
+
+//     const notSoldProducts = await Product.find({
+//       updatedAt: { $lt: notSoldSince },
+//       deletedAt: null,
+//     }).select("_id name stock updatedAt");
+
+//     res.json({
+//       expired: {
+//         count: expiredProducts.length,
+//         products: expiredProducts,
+//       },
+//       lowStock: {
+//         count: lowStockProducts.length,
+//         products: lowStockProducts,
+//       },
+//       notSoldRecently: {
+//         since: NOT_SOLD_DAYS + " days ago",
+//         count: notSoldProducts.length,
+//         products: notSoldProducts,
+//       },
+//     });
+//   } catch (error) {
+//     console.error("Error fetching product stats:", error);
+//     res.status(500).json({ error: "Internal Server Error" });
+//   }
+// };
+
+
+const NOT_SOLD_DAYS_DEFAULT = 35; // default value if not provided in query/body
+const LOW_STOCK_THRESHOLD_DEFAULT = 5;
+
+const daysAgo = (days) => {
+  const date = new Date();
+  date.setDate(date.getDate() - days);
+  return date;
+};
+
 exports.getProductStatsReport = async (req, res) => {
   try {
+    const NOT_SOLD_DAYS = parseInt(
+      req.query.notSoldDays || req.body?.notSoldDays || NOT_SOLD_DAYS_DEFAULT
+    );
+
+    const LOW_STOCK = parseInt(
+      req.query.lowStock || req.body?.lowStock || LOW_STOCK_THRESHOLD_DEFAULT
+    );
+
     const today = new Date();
     const notSoldSince = daysAgo(NOT_SOLD_DAYS);
 
     const expiredProducts = await Product.find({
       expiryDate: { $lt: today },
       deletedAt: null,
-    }).select("_id name stock expiryDate");
+    }).select("_id name secondName stock expiryDate");
 
     const lowStockProducts = await Product.find({
-      stock: { $lt: LOW_STOCK_THRESHOLD },
+      stock: { $lt: LOW_STOCK },
       deletedAt: null,
-    }).select("_id name stock");
+    }).select("_id name secondName stock");
 
     const notSoldProducts = await Product.find({
       updatedAt: { $lt: notSoldSince },
       deletedAt: null,
-    }).select("_id name stock updatedAt");
+    }).select("_id name secondName stock updatedAt");
 
     res.json({
       expired: {
@@ -99,7 +161,7 @@ exports.getProductStatsReport = async (req, res) => {
         products: lowStockProducts,
       },
       notSoldRecently: {
-        since: NOT_SOLD_DAYS + " days ago",
+        since: `${NOT_SOLD_DAYS} days ago`,
         count: notSoldProducts.length,
         products: notSoldProducts,
       },
@@ -109,3 +171,4 @@ exports.getProductStatsReport = async (req, res) => {
     res.status(500).json({ error: "Internal Server Error" });
   }
 };
+

@@ -11,7 +11,7 @@ const customerRoutes = require("./routes/customerRoutes");
 const productRoutes = require("./routes/productRoutes");
 const syncRoutes = require("./routes/syncRoutes");
 const invoiceRoutes = require("./routes/invoiceRoutes");
-const storeRoutes = require("./routes/stroreRoutes");
+const storeRoutes = require("./routes/storeRouter");
 const reportRoutes = require("./routes/reportRoutes");
 const attendanceRoutes = require("./routes/attendanceRoutes");
 const salaryRoutes = require("./routes/salaryRoutes");
@@ -52,6 +52,7 @@ app.use("/api/products", productRoutes);
 app.use("/api/sync", syncRoutes);
 app.use("/api", invoiceRoutes);
 app.use("/api/stores", storeRoutes);
+
 app.use("/api/reports", reportRoutes);
 app.use("/api/attendance", attendanceRoutes);
 app.use("/api/salary", salaryRoutes);
@@ -83,13 +84,10 @@ const isDev =
 const mongoUri = isDev
   ? process.env.LOCAL_MONGO_URI
   : process.env.REMOTE_MONGO_URI;
-mongoose
-  .connect(mongoUri, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  })
+mongoose.connect(mongoUri)
   .then(() => console.log(`Connected to MongoDB: ${mongoUri}`))
   .catch((err) => console.error("MongoDB connection error:", err));
+
 
 // Start server
 const PORT = process.env.PORT || 3000;
