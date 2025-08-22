@@ -24,57 +24,122 @@ exports.createProduct = async (req, res) => {
 
 exports.getProducts = async (req, res) => {
   try {
-    // ✅ Parse and validate page and limit
+    // Pagination
     const page = Number(req.query.page) > 0 ? Number(req.query.page) : 1;
     const limit = Number(req.query.limit) > 0 ? Number(req.query.limit) : 10;
     const skip = (page - 1) * limit;
 
-    // ✅ Build search filter
-    const filter = {};
-    // Exclude soft-deleted products
-    filter.$or = [{ deletedAt: { $exists: false } }, { deletedAt: null }];
-    if (req?.query?.search) {
-      const searchRegex = new RegExp(req.query.search, "i");
-      filter.$or = [
-        { name: { $regex: searchRegex } },
-        {
-          $expr: {
-            $regexMatch: {
-              input: { $toString: "$secondName" },
-              regex: req.query.search,
-              options: "i",
+    // Params
+    const {
+      search = "",
+      hasImage,
+      stockStatus,
+      purchasePriceMin,
+      purchasePriceMax,
+      sellingPrice1Min,
+      sellingPrice1Max,
+      sellingPrice2Min,
+      sellingPrice2Max,
+      expiryStart,
+      expiryEnd,
+      updatedBy,
+    } = req.query;
+
+    // Build filter as $and of all conditions
+    const andConditions = [];
+
+    // Soft delete guard
+    andConditions.push({
+      $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
+    });
+
+    // Search block
+    if (search && String(search).trim()) {
+      const searchRegex = new RegExp(String(search).trim(), "i");
+      andConditions.push({
+        $or: [
+          { name: { $regex: searchRegex } },
+          {
+            $expr: {
+              $regexMatch: {
+                input: { $toString: "$secondName" },
+                regex: String(search),
+                options: "i",
+              },
             },
           },
-        },
-        {
-          $expr: {
-            $regexMatch: {
-              input: { $toString: "$searchKey" },
-              regex: req.query.search,
-              options: "i",
+          {
+            $expr: {
+              $regexMatch: {
+                input: { $toString: "$searchKey" },
+                regex: String(search),
+                options: "i",
+              },
             },
           },
-        },
-        {
-          $expr: {
-            $regexMatch: {
-              input: { $toString: "$barcode" },
-              regex: req.query.search,
-              options: "i",
+          {
+            $expr: {
+              $regexMatch: {
+                input: { $toString: "$barcode" },
+                regex: String(search),
+                options: "i",
+              },
             },
           },
-        },
-      ];
+        ],
+      });
     }
+
+    // hasImage: YES|NO
+    if (hasImage === "YES") andConditions.push({ hasImage: true });
+    if (hasImage === "NO") andConditions.push({ hasImage: false });
+
+    // stockStatus: IN_STOCK|OUT_OF_STOCK
+    if (stockStatus === "IN_STOCK") andConditions.push({ stock: { $gt: 0 } });
+    if (stockStatus === "OUT_OF_STOCK")
+      andConditions.push({ stock: { $lte: 0 } });
+
+    // Helper for numeric range on a field
+    const addNumberRange = (field, minVal, maxVal) => {
+      const hasMin =
+        minVal !== undefined && minVal !== "" && !isNaN(Number(minVal));
+      const hasMax =
+        maxVal !== undefined && maxVal !== "" && !isNaN(Number(maxVal));
+      if (!hasMin && !hasMax) return;
+
+      const cond = {};
+      if (hasMin) cond.$gte = Number(minVal);
+      if (hasMax) cond.$lte = Number(maxVal);
+      andConditions.push({ [field]: cond });
+    };
+
+    addNumberRange("purchasePrice", purchasePriceMin, purchasePriceMax);
+    addNumberRange("sellingPrice1", sellingPrice1Min, sellingPrice1Max);
+    addNumberRange("sellingPrice2", sellingPrice2Min, sellingPrice2Max);
+
+    // Expiry date range (inclusive)
+    if (expiryStart || expiryEnd) {
+      const cond = {};
+      if (expiryStart) cond.$gte = new Date(expiryStart);
+      if (expiryEnd) {
+        const d = new Date(expiryEnd);
+        d.setHours(23, 59, 59, 999);
+        cond.$lte = d;
+      }
+      andConditions.push({ expiryDate: cond });
+    }
+
+    // Updated by
+    if (updatedBy) andConditions.push({ updatedBy: String(updatedBy) });
+
+    const filter = andConditions.length ? { $and: andConditions } : {};
     const sort = { updatedAt: -1 };
+
     const [products, total] = await Promise.all([
-      Product.find(filter).sort(sort).skip(skip).limit(limit), // Apply skip & limit!
+      Product.find(filter).sort(sort).skip(skip).limit(limit),
       Product.countDocuments(filter),
     ]);
 
-    console.log("✅ Products returned:", products.length);
-
-    // ✅ Send response
     res.status(200).json({
       data: products,
       total,
@@ -141,7 +206,7 @@ exports.deleteProduct = async (req, res) => {
 
     const deleted = await Product.softDelete(
       req.params.id,
-      req.user?.userName || "system",
+      req.user?.userName || "system"
     );
     res.json({
       message: "Product deleted",

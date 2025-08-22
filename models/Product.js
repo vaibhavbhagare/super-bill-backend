@@ -24,6 +24,7 @@ const productSchema = new mongoose.Schema(
     updatedBy: { type: String },
     deletedAt: { type: Date, default: null },
     deletedBy: { type: String },
+    hasImage: { type: Boolean }
   },
   {
     timestamps: true,
@@ -56,7 +57,6 @@ productSchema.statics.markAsSynced = async function (id) {
     { _id: id, isSynced: false },
     { $set: { isSynced: true } },
   );
-  console.log(result);
   return result;
 };
 

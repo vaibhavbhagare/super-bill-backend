@@ -15,6 +15,7 @@ const storeRoutes = require("./routes/storeRouter");
 const reportRoutes = require("./routes/reportRoutes");
 const attendanceRoutes = require("./routes/attendanceRoutes");
 const salaryRoutes = require("./routes/salaryRoutes");
+const imageUpload = require("./routes/imageUpload");
 
 dotenv.config();
 
@@ -56,6 +57,7 @@ app.use("/api/stores", storeRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/attendance", attendanceRoutes);
 app.use("/api/salary", salaryRoutes);
+app.use("/api/images", imageUpload);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
