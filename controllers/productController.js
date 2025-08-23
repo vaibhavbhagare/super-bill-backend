@@ -92,7 +92,13 @@ exports.getProducts = async (req, res) => {
 
     // hasImage: YES|NO
     if (hasImage === "YES") andConditions.push({ hasImage: true });
-    if (hasImage === "NO") andConditions.push({ hasImage: false });
+    if (hasImage === "NO") andConditions.push({
+      $or: [
+        { hasImage: false },
+        { hasImage: null },
+        { hasImage: { $exists: false } }
+      ]
+    });
 
     // stockStatus: IN_STOCK|OUT_OF_STOCK
     if (stockStatus === "IN_STOCK") andConditions.push({ stock: { $gt: 0 } });
