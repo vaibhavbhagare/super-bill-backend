@@ -86,7 +86,11 @@ const isDev =
 const mongoUri = isDev
   ? process.env.LOCAL_MONGO_URI
   : process.env.REMOTE_MONGO_URI;
-mongoose.connect(mongoUri)
+mongoose
+  .connect(mongoUri, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  })
   .then(() => console.log(`Connected to MongoDB: ${mongoUri}`))
   .catch((err) => console.error("MongoDB connection error:", err));
 
