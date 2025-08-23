@@ -139,7 +139,6 @@ exports.purgeDeletedRecords = async (req, res) => {
 
 // POST /api/sync
 exports.syncCollections = async (req, res) => {
-  ``;
   const { collection } = req.body;
   let localClient, remoteClient;
   try {
@@ -195,25 +194,49 @@ exports.syncCollections = async (req, res) => {
 
         // 3. Merge local changes to remote
         for (const doc of localChanges) {
+          const naturalKeyFilter =
+            col === "attendances"
+              ? { user: doc.user, date: doc.date }
+              : { _id: doc._id };
+
           const remoteDoc = await dbRemote
             .collection(col)
-            .findOne({ _id: doc._id });
-          if (!remoteDoc || doc.updatedAt > remoteDoc.updatedAt) {
+            .findOne(naturalKeyFilter);
+
+          const { _id, ...docWithoutId } = doc;
+          const docUpdatedAt = doc.updatedAt ? new Date(doc.updatedAt) : null;
+          const remoteUpdatedAt = remoteDoc?.updatedAt
+            ? new Date(remoteDoc.updatedAt)
+            : null;
+
+          if (!remoteDoc || (docUpdatedAt && (!remoteUpdatedAt || docUpdatedAt > remoteUpdatedAt))) {
             await dbRemote
               .collection(col)
-              .updateOne({ _id: doc._id }, { $set: doc }, { upsert: true });
+              .updateOne(naturalKeyFilter, { $set: docWithoutId }, { upsert: true });
           }
         }
 
         // 4. Merge remote changes to local
         for (const doc of remoteChanges) {
+          const naturalKeyFilter =
+            col === "attendances"
+              ? { user: doc.user, date: doc.date }
+              : { _id: doc._id };
+
           const localDoc = await dbLocal
             .collection(col)
-            .findOne({ _id: doc._id });
-          if (!localDoc || doc.updatedAt > localDoc.updatedAt) {
+            .findOne(naturalKeyFilter);
+
+          const { _id, ...docWithoutId } = doc;
+          const docUpdatedAt = doc.updatedAt ? new Date(doc.updatedAt) : null;
+          const localUpdatedAt = localDoc?.updatedAt
+            ? new Date(localDoc.updatedAt)
+            : null;
+
+          if (!localDoc || (docUpdatedAt && (!localUpdatedAt || docUpdatedAt > localUpdatedAt))) {
             await dbLocal
               .collection(col)
-              .updateOne({ _id: doc._id }, { $set: doc }, { upsert: true });
+              .updateOne(naturalKeyFilter, { $set: docWithoutId }, { upsert: true });
           }
         }
 
