@@ -1,10 +1,20 @@
 const fs = require('fs');
 const path = require('path');
 
-// Create logs directory if it doesn't exist
-const logsDir = path.join(__dirname, '../logs');
-if (!fs.existsSync(logsDir)) {
-  fs.mkdirSync(logsDir);
+// Check if we're running on Vercel (serverless environment)
+const isVercel = process.env.VERCEL === '1' || process.env.NODE_ENV === 'production';
+
+// Create logs directory if it doesn't exist (only in development)
+let logsDir;
+if (!isVercel) {
+  logsDir = path.join(__dirname, '../logs');
+  if (!fs.existsSync(logsDir)) {
+    try {
+      fs.mkdirSync(logsDir);
+    } catch (error) {
+      console.warn('Could not create logs directory:', error.message);
+    }
+  }
 }
 
 // Function to get current date string for log files
@@ -21,6 +31,8 @@ const getTimeString = () => {
 
 // Function to get log file paths with date
 const getLogFilePaths = () => {
+  if (isVercel) return {};
+  
   const dateString = getDateString();
   return {
     access: path.join(logsDir, `access-${dateString}.log`),
@@ -33,6 +45,12 @@ const getLogFilePaths = () => {
 
 // Helper function to write logs with rotation
 const writeLog = (filePath, message) => {
+  if (isVercel) {
+    // On Vercel, just log to console
+    console.log(`[${getTimeString()}] ${message}`);
+    return;
+  }
+  
   try {
     const timestamp = getTimeString();
     const logEntry = `[${timestamp}] ${message}\n`;
@@ -44,6 +62,8 @@ const writeLog = (filePath, message) => {
 
 // Function to clean old log files (keep last 30 days)
 const cleanOldLogs = () => {
+  if (isVercel) return; // Skip on Vercel
+  
   try {
     const files = fs.readdirSync(logsDir);
     const thirtyDaysAgo = new Date();
@@ -63,8 +83,10 @@ const cleanOldLogs = () => {
   }
 };
 
-// Clean old logs every day
-setInterval(cleanOldLogs, 24 * 60 * 60 * 1000); // Run every 24 hours
+// Clean old logs every day (only in development)
+if (!isVercel) {
+  setInterval(cleanOldLogs, 24 * 60 * 60 * 1000); // Run every 24 hours
+}
 
 // Request logging middleware
 const requestLogger = (req, res, next) => {
@@ -174,6 +196,8 @@ const databaseLogger = () => {
 
 // Function to get log file info
 const getLogFileInfo = () => {
+  if (isVercel) return { environment: 'vercel', logging: 'console-only' };
+  
   try {
     const logPaths = getLogFilePaths();
     const info = {};
