@@ -98,7 +98,10 @@ app.use((err, req, res, next) => {
   });
 });
 
-app.use("/images", express.static("images"));
+// Serve static images (only in development)
+if (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'local') {
+  app.use("/images", express.static("images"));
+}
 
 // 404 handler
 app.use((req, res) => {
@@ -128,5 +131,5 @@ mongoose
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+  console.log(`Server is running on port ${PORT}, env: ${process.env.NODE_ENV}`);
 });
