@@ -3,6 +3,7 @@
 node_modules
 
 /uploads
+/logs
 
 # Lock file (optional – keep if you want deterministic installs)
 package-lock.json
