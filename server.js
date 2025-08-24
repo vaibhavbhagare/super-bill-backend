@@ -15,7 +15,7 @@ const storeRoutes = require("./routes/storeRouter");
 const reportRoutes = require("./routes/reportRoutes");
 const attendanceRoutes = require("./routes/attendanceRoutes");
 const salaryRoutes = require("./routes/salaryRoutes");
-const imageUpload = require("./routes/imageUpload");
+// const imageUpload = require("./routes/imageUpload");
 // const ecommerceRoutes = require("./routes/ecommerceRoutes");
 
 // const { requestLogger, errorLogger, performanceLogger } = require("./middleware/logger");
@@ -84,7 +84,7 @@ app.use("/api/stores", storeRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/attendance", attendanceRoutes);
 app.use("/api/salary", salaryRoutes);
-app.use("/api/images", imageUpload);
+// app.use("/api/images", imageUpload);
 // app.use("/api/ecommerce", ecommerceRoutes);
 
 // Error handling middleware
