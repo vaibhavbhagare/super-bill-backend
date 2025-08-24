@@ -18,7 +18,7 @@ const salaryRoutes = require("./routes/salaryRoutes");
 const imageUpload = require("./routes/imageUpload");
 const ecommerceRoutes = require("./routes/ecommerceRoutes");
 
-const { requestLogger, errorLogger, performanceLogger } = require("./middleware/logger");
+// const { requestLogger, errorLogger, performanceLogger } = require("./middleware/logger");
 
 dotenv.config();
 
@@ -50,8 +50,8 @@ app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
 // Add logging middleware
-app.use(requestLogger);
-app.use(performanceLogger);
+// app.use(requestLogger);
+// app.use(performanceLogger);
 
 // Routes
 app.use("/api/users", userRoutes);
@@ -68,7 +68,7 @@ app.use("/api/images", imageUpload);
 app.use("/api/ecommerce", ecommerceRoutes);
 
 // Error handling middleware
-app.use(errorLogger);
+// app.use(errorLogger);
 
 app.use((err, req, res, next) => {
   console.error(err.stack);
