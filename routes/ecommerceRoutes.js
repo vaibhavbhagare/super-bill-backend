@@ -30,7 +30,4 @@ router.get("/products/:id",
   ecommerceController.getProductById
 );
 
- 
- 
-
 module.exports = router;
