@@ -35,7 +35,7 @@ const getProducts = async (req, res) => {
     if (brand) {
       filter.brand = brand;
     }
-
+    filter.hasImage = true;
     // Price range filter
     if (minPrice || maxPrice) {
       filter.sellingPrice1 = {};
