@@ -55,8 +55,7 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 
-// Handle preflight requests
-app.options('*', cors(corsOptions));
+// Preflight is already handled by the CORS middleware above
 
 // Apply rate limiting
 const limiter = rateLimit({
