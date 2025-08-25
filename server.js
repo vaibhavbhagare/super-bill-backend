@@ -127,8 +127,12 @@ mongoose
   .catch((err) => console.error("MongoDB connection error:", err));
 
 
-// Start server
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}, env: ${process.env.NODE_ENV}`);
-});
+// Start server locally; export app for serverless platforms (e.g., Vercel)
+if (!process.env.VERCEL) {
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}, env: ${process.env.NODE_ENV}`);
+  });
+}
+
+module.exports = app;
