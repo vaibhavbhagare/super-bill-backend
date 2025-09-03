@@ -53,6 +53,11 @@ app.use(bodyParser.urlencoded({ extended: true }));
 // app.use(performanceLogger);
 
 // Routes
+// Basic health route (useful for Vercel cold starts and uptime checks)
+app.get("/api/health", (req, res) => {
+  res.status(200).json({ status: "ok", env: process.env.NODE_ENV || "unknown" });
+});
+
 app.use("/api/users", userRoutes);
 app.use("/api/customers", customerRoutes);
 app.use("/api/products", productRoutes);
@@ -98,13 +103,25 @@ const isDev =
 const mongoUri = isDev
   ? process.env.LOCAL_MONGO_URI
   : process.env.REMOTE_MONGO_URI;
-mongoose
-  .connect(mongoUri, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  })
-  .then(() => console.log(`Connected to MongoDB: ${mongoUri}`))
-  .catch((err) => console.error("MongoDB connection error:", err));
+// Avoid crashing the process if URI is missing on serverless boot
+if (!mongoUri || typeof mongoUri !== "string" || mongoUri.trim().length === 0) {
+  console.warn(
+    "MongoDB URI is not set. Skipping DB connection. Set REMOTE_MONGO_URI (prod) or LOCAL_MONGO_URI (dev).",
+  );
+} else {
+  // In serverless environments, reuse the connection across invocations if possible
+  if (!global._mongooseConnection) {
+    global._mongooseConnection = mongoose
+      .connect(mongoUri, {
+        useNewUrlParser: true,
+        useUnifiedTopology: true,
+      })
+      .then(() => console.log(`Connected to MongoDB`))
+      .catch((err) => {
+        console.error("MongoDB connection error:", err);
+      });
+  }
+}
 
 
 // Start server locally; export app for serverless platforms (e.g., Vercel)

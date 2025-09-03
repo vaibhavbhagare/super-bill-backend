@@ -4,14 +4,14 @@ const multer = require("multer");
 const imageUploadController = require("../controllers/imageUploadController");
 const { auth } = require("../middleware/auth");
 
+const storage =
+  process.env.NODE_ENV === "production"
+    ? multer.memoryStorage()
+    : multer.diskStorage({ dest: "./uploads/" });
+
 const upload = multer({
-  storage:
-    process.env.NODE_ENV === "production"
-      ? multer.memoryStorage()
-      : multer.diskStorage({ dest: "./uploads/" }),
-  limits: {
-    fileSize: 5 * 1024 * 1024,
-  },
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 },
 });
 
 // Protected routes (authentication required)

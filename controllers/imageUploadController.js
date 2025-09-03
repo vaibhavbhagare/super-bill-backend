@@ -39,7 +39,16 @@ const Product = require("../models/Product");
 exports.uploadProductImage = async (req, res) => {
   const { productId } = req.params;
   try {
-    await cloudinary.uploader.upload(req.file.path, {
+    if (!req.file) {
+      return res.status(400).json({ error: "No image file uploaded" });
+    }
+
+    // If memory storage, Cloudinary can accept a data URI or buffer stream
+    const uploadSource = req.file.buffer
+      ? `data:${req.file.mimetype};base64,${req.file.buffer.toString("base64")}`
+      : req.file.path;
+
+    await cloudinary.uploader.upload(uploadSource, {
       folder: `products/${productId}`,
       public_id: "main",
       overwrite: true,
