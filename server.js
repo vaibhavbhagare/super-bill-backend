@@ -53,8 +53,6 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-// Express 5 uses path-to-regexp v6; use a compatible pattern for preflight
-app.options("/:path(*)", cors(corsOptions));
 
 // Apply rate limiting
 const limiter = rateLimit({
