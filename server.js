@@ -11,14 +11,6 @@ const customerRoutes = require("./routes/customerRoutes");
 const productRoutes = require("./routes/productRoutes");
 const syncRoutes = require("./routes/syncRoutes");
 const invoiceRoutes = require("./routes/invoiceRoutes");
-const storeRoutes = require("./routes/storeRouter");
-const reportRoutes = require("./routes/reportRoutes");
-const attendanceRoutes = require("./routes/attendanceRoutes");
-const salaryRoutes = require("./routes/salaryRoutes");
-const imageUpload = require("./routes/imageUpload");
-const ecommerceRoutes = require("./routes/ecommerceRoutes");
-
-const { requestLogger, errorLogger, performanceLogger } = require("./middleware/logger");
 
 dotenv.config();
 
@@ -49,27 +41,13 @@ app.use(limiter);
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-// Add logging middleware
-app.use(requestLogger);
-app.use(performanceLogger);
-
 // Routes
 app.use("/api/users", userRoutes);
 app.use("/api/customers", customerRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/sync", syncRoutes);
-app.use("/api/invoices", invoiceRoutes);
-app.use("/api/stores", storeRoutes);
-
-app.use("/api/reports", reportRoutes);
-app.use("/api/attendance", attendanceRoutes);
-app.use("/api/salary", salaryRoutes);
-app.use("/api/images", imageUpload);
-app.use("/api/ecommerce", ecommerceRoutes);
-
+app.use("/api", invoiceRoutes);
 // Error handling middleware
-app.use(errorLogger);
-
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(err.status || 500).json({
@@ -93,9 +71,8 @@ const isDev =
   process.env.NODE_ENV === "development" ||
   process.env.NODE_ENV === "local" ||
   process.env.NODE_ENV === "dev";
-const mongoUri = isDev
-  ? process.env.LOCAL_MONGO_URI
-  : process.env.REMOTE_MONGO_URI;
+const mongoUri = isDev ? process.env.LOCAL_MONGO_URI : process.env.MONGO_URI;
+
 mongoose
   .connect(mongoUri, {
     useNewUrlParser: true,
@@ -103,7 +80,6 @@ mongoose
   })
   .then(() => console.log(`Connected to MongoDB: ${mongoUri}`))
   .catch((err) => console.error("MongoDB connection error:", err));
-
 
 // Start server
 const PORT = process.env.PORT || 3000;
