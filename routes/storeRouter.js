@@ -1,27 +1,15 @@
 const express = require("express");
-const {
-  createStore,
-  getStores,
-  getStoreById,
-  updateStore,
-  deleteStore,
-} = require("../controllers/storeController");
-
 const router = express.Router();
-const { auth } = require("../middleware/auth");
-router.use(auth);
+const storeController = require("../controllers/storeController");
 
-// Create
-router.post("/", createStore);
+// CRUD routes
+router.post("/", storeController.createStore);
+router.get("/", storeController.getStores);
+router.get("/:id", storeController.getStoreById);
+router.put("/:id", storeController.updateStore);
+router.delete("/:id", storeController.deleteStore);
 
-// Read
-router.get("/", getStores);
-router.get("/:id", getStoreById);
-
-// Update
-router.put("/:id", updateStore);
-
-// Delete
-router.delete("/:id", deleteStore);
+// Extra: mark as synced
+router.patch("/:id/sync", storeController.markStoreAsSynced);
 
 module.exports = router;

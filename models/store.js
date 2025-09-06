@@ -2,84 +2,80 @@ const mongoose = require("mongoose");
 
 const storeSchema = new mongoose.Schema(
   {
-    storeProfile: {
-      storeName: { type: String, required: true, trim: true },
-      storeAddress: { type: String, required: true, trim: true },
-      storePhone: { type: String, required: true, trim: true },
-      isActive: { type: Boolean, default: false },
-      storeOwnerName: { type: String, trim: true },
-      storeOwnerAddress: { type: String, trim: true },
-      storeOwnerEmail: { type: String, lowercase: true, trim: true },
-      storeLogo: { type: String },
+    storeName: { type: String, required: true },
+    ownerName: { type: String, required: true },
+    email: {
+      type: String,
+      trim: true,
+      lowercase: true,
+      match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, "Invalid email address"],
     },
-
-    printBillSetting: {
-      template: {
-        type: String,
-        enum: ["Modern", "Simple", "New"],
-        required: true,
-        default: "Modern",
-      },
-      storeNameFont: {
-        type: String,
-        enum: ["Large", "Small"],
-        default: "Small",
-      },
-      //hasShow...
-      address: { type: Boolean, required: true },
-      phoneNumber: { type: Boolean, required: true },
-      billerName: { type: Boolean, required: true },
-      customerName: { type: Boolean, required: true },
-      customerPhone: { type: Boolean, required: true },
-      showMRP: { type: Boolean, required: true },
-      showSummary: { type: Boolean, required: true },
-
-      footer1: {
-        enabled: { type: Boolean, default: false },
-        text: { type: String, default: "" },
-      },
-      footer2: {
-        enabled: { type: Boolean, default: false },
-        text: { type: String, default: "" },
-      },
+    phone: {
+      type: String,
+      required: true,
+      match: [/^\d{10}$/, "Phone number must be 10 digits"],
     },
-
-    barcodeSetting: {
-      template: {
-        type: String,
-        enum: ["Modern", "Simple", "New"],
-        required: true,
-      },
-      showStoreName: { type: Boolean, required: true },
-      showExpiryDate: { type: Boolean, default: "No" },
-      barcodeSize: {
-        type: String,
-        enum: ["Small", "Medium", "Large"],
-        default: "Medium",
-      },
-      showMRP: {
-        type: String,
-        enum: ["Small", "Medium", "Large"],
-        default: "Small",
-      },
-      showSP: {
-        type: String,
-        enum: ["Small", "Medium", "Large"],
-        default: "Small",
-      },
-      showDiscountCount: {
-        type: String,
-        enum: ["Small", "Medium", "Large"],
-        default: "Small",
-      },
+    address: { type: String, required: true, trim: true },
+    website: { type: String, default: null },
+    gstNumber: {
+      type: String,
+      match: [
+        /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/,
+        "Invalid GST number",
+      ],
     },
+    panNumber: {
+      type: String,
+      match: [/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/, "Invalid PAN number"],
+    },
+    establishedDate: { type: Date, default: null },
+    licenseNumber: { type: String, default: null },
+    bankAccountNumber: { type: String, default: null },
+    ifscCode: { type: String, default: null },
+    upiId: {
+      type: String,
+      match: [
+        /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/,
+        "Invalid UPI ID format",
+      ],
+      default: null,
+    },
+    storeLogo: { type: String, default: null }, // base64 or URL
+    isSynced: { type: Boolean, default: false },
+    createdBy: { type: String },
+    deletedAt: { type: Date, default: null },
+    deletedBy: { type: String },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+  }
 );
 
-// 👇 this prevents Mongoose from reusing the old model definition
-mongoose.models = {};
+// Auto-expire soft deleted docs after 30 days
+storeSchema.index({ deletedAt: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 30 });
 
-const Store = mongoose.model("Store", storeSchema);
+// Soft delete function
+storeSchema.statics.softDelete = async function (id, deletedBy) {
+  return this.findByIdAndUpdate(
+    id,
+    {
+      $set: {
+        deletedAt: new Date(),
+        deletedBy,
+        updatedAt: new Date(),
+      },
+    },
+    { new: true }
+  );
+};
 
-module.exports = Store;
+// Mark store as synced
+storeSchema.statics.markAsSynced = async function (id) {
+  const result = await this.findByIdAndUpdate(
+    { _id: id, isSynced: false },
+    { $set: { isSynced: true } }
+  );
+  return result;
+};
+
+module.exports = mongoose.model("Store", storeSchema);
