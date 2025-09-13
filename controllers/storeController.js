@@ -47,7 +47,12 @@ exports.createStore = async (req, res) => {
 // ✅ Get all Stores
 exports.getStores = async (req, res) => {
   try {
-    const stores = await Store.find().sort({ createdAt: -1 });
+    // Filter out soft-deleted stores
+    const filter = {
+      $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
+    };
+    
+    const stores = await Store.find(filter).sort({ createdAt: -1 });
     res.status(200).json({
       success: true,
       count: stores.length,
@@ -65,7 +70,10 @@ exports.getStores = async (req, res) => {
 // ✅ Get Store by ID
 exports.getStoreById = async (req, res) => {
   try {
-    const store = await Store.findById(req.params.id);
+    const store = await Store.findOne({
+      _id: req.params.id,
+      $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
+    });
     if (!store) {
       return res.status(404).json({
         success: false,
@@ -116,7 +124,10 @@ exports.updateStore = async (req, res) => {
 // ✅ Delete Store
 exports.deleteStore = async (req, res) => {
   try {
-    const deletedStore = await Store.findByIdAndDelete(req.params.id);
+    const deletedStore = await Store.softDelete(
+      req.params.id,
+      req.user?.userName || "system",
+    );
     if (!deletedStore) {
       return res.status(404).json({
         success: false,
@@ -126,6 +137,8 @@ exports.deleteStore = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Store deleted successfully",
+      deletedBy: req.user?.userName || "system",
+      deletedAt: new Date(),
     });
   } catch (error) {
     res.status(500).json({
