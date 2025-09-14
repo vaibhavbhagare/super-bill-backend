@@ -3,16 +3,28 @@ const Store = require("../models/store");
 // ✅ Create a Store
 exports.createStore = async (req, res) => {
   try {
-    // Transform flat payload to nested structure expected by the model
+    // Check if a store already exists (including soft-deleted ones)
+    const existingStore = await Store.findOne({});
+    
+    if (existingStore) {
+      return res.status(409).json({
+        success: false,
+        message: "Only one store can be created. A store already exists in the database.",
+        existingStoreId: existingStore._id,
+      });
+    }
+
+    // Handle both flat and nested payload structures
     const storeData = {
       storeProfile: {
-        storeName: req.body.storeName,
-        storeAddress: req.body.storeAddress,
-        storePhone: req.body.storePhone,
-        isActive: req.body.isActive || false,
-        storeOwnerName: req.body.ownerName,
-        storeOwnerEmail: req.body.email,
-        storeLogo: req.body.hasImage ? req.body.storeLogo : null,
+        storeName: req.body.storeProfile?.storeName || req.body.storeName,
+        storeAddress: req.body.storeProfile?.storeAddress || req.body.storeAddress,
+        storePhone: req.body.storeProfile?.storePhone || req.body.storePhone,
+        isActive: req.body.storeProfile?.isActive || req.body.isActive || false,
+        storeOwnerName: req.body.storeProfile?.storeOwnerName || req.body.ownerName,
+        storeOwnerEmail: req.body.storeProfile?.storeOwnerEmail || req.body.email,
+        storeLogo: (req.body.storeProfile?.hasImage || req.body.hasImage) ? 
+          (req.body.storeProfile?.storeLogo || req.body.storeLogo) : null,
       },
       // Optional fields for initial store creation
       printBillSetting: req.body.printBillSetting || {},
@@ -39,6 +51,40 @@ exports.createStore = async (req, res) => {
     res.status(400).json({
       success: false,
       message: "Failed to create store",
+      error: error.message,
+    });
+  }
+};
+
+// ✅ Get Store (single store - returns store if exists, message if not)
+exports.getStore = async (req, res) => {
+  try {
+    // Find the single store (excluding soft-deleted)
+    const filter = {
+      $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
+    };
+    
+    const store = await Store.findOne(filter);
+    
+    if (!store) {
+      return res.status(200).json({
+        success: true,
+        message: "No store found. Please create a store first.",
+        data: null,
+        storeExists: false,
+      });
+    }
+    
+    res.status(200).json({
+      success: true,
+      message: "Store found successfully",
+      data: store,
+      storeExists: true,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch store",
       error: error.message,
     });
   }

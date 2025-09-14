@@ -2,6 +2,12 @@ const mongoose = require("mongoose");
 
 const storeSchema = new mongoose.Schema(
   {
+    storeId: { 
+      type: String, 
+      unique: true, 
+      required: true,
+      default: () => `STORE_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    },
     storeProfile: {
       storeName: { type: String, required: true, trim: true },
       storeAddress: { type: String, required: true, trim: true },
