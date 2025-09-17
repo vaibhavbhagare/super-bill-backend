@@ -4,10 +4,10 @@ const invoiceController = require("../controllers/invoiceController");
 const { auth } = require("../middleware/auth");
 router.use(auth);
 
-router.post("/invoices", invoiceController.createInvoice);
-router.get("/invoices", invoiceController.getInvoices);
-router.get("/invoices/:id", invoiceController.getInvoiceById);
-router.put("/invoices/:id", invoiceController.updateInvoice);
-router.delete("/invoices/:id", invoiceController.deleteInvoice);
+router.post("/", invoiceController.createInvoice);
+router.get("/", invoiceController.getInvoices);
+router.get("/:id", invoiceController.getInvoiceById);
+router.put("/:id", invoiceController.updateInvoice);
+router.delete("/:id", invoiceController.deleteInvoice);
 
 module.exports = router;

@@ -16,6 +16,9 @@ const reportRoutes = require("./routes/reportRoutes");
 const attendanceRoutes = require("./routes/attendanceRoutes");
 const salaryRoutes = require("./routes/salaryRoutes");
 const imageUpload = require("./routes/imageUpload");
+const ecommerceRoutes = require("./routes/ecommerceRoutes");
+
+// const { requestLogger, errorLogger, performanceLogger } = require("./middleware/logger");
 
 dotenv.config();
 
@@ -25,15 +28,31 @@ const app = express();
 app.use(helmet()); // Set security HTTP headers
 app.use(cookieParser()); // Parse cookies
 
-// CORS configuration
-app.use(
-  cors({
-    origin: process.env.CORS_ORIGIN || "*",
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-  }),
-);
+// CORS: reflect only allowed origins and support credentials
+const allowedOrigins = (process.env.CORS_ORIGINS || "http://localhost:8081")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error("Not allowed by CORS"));
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "X-Requested-With",
+    "Accept",
+    "Origin",
+  ],
+  optionsSuccessStatus: 204,
+};
+
+app.use(cors(corsOptions));
 
 // Apply rate limiting
 const limiter = rateLimit({
@@ -46,20 +65,32 @@ app.use(limiter);
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
+// Add logging middleware
+// app.use(requestLogger);
+// app.use(performanceLogger);
+
 // Routes
+// Basic health route (useful for Vercel cold starts and uptime checks)
+app.get("/api/health", (req, res) => {
+  res.status(200).json({ status: "ok", env: process.env.NODE_ENV || "unknown" });
+});
+
 app.use("/api/users", userRoutes);
 app.use("/api/customers", customerRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/sync", syncRoutes);
-app.use("/api", invoiceRoutes);
+app.use("/api/invoices", invoiceRoutes);
 app.use("/api/stores", storeRoutes);
 
 app.use("/api/reports", reportRoutes);
 app.use("/api/attendance", attendanceRoutes);
 app.use("/api/salary", salaryRoutes);
 app.use("/api/images", imageUpload);
+app.use("/api/ecommerce", ecommerceRoutes);
 
 // Error handling middleware
+// app.use(errorLogger);
+
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(err.status || 500).json({
@@ -68,7 +99,10 @@ app.use((err, req, res, next) => {
   });
 });
 
-app.use("/images", express.static("images"));
+// Serve static images (only in development)
+if (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'local') {
+  app.use("/images", express.static("images"));
+}
 
 // 404 handler
 app.use((req, res) => {
@@ -93,7 +127,6 @@ mongoose
   })
   .then(() => console.log(`Connected to MongoDB: ${mongoUri}`))
   .catch((err) => console.error("MongoDB connection error:", err));
-
 
 // Start server
 const PORT = process.env.PORT || 3000;

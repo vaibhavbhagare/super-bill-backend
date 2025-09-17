@@ -8,31 +8,29 @@ const storeSchema = new mongoose.Schema(
       storePhone: { type: String, required: true, trim: true },
       isActive: { type: Boolean, default: false },
       storeOwnerName: { type: String, trim: true },
-      storeOwnerAddress: { type: String, trim: true },
       storeOwnerEmail: { type: String, lowercase: true, trim: true },
-      storeLogo: { type: String },
+      hasImage: { type: String },
     },
 
     printBillSetting: {
       template: {
         type: String,
-        enum: ["Modern", "Simple", "New"],
-        required: true,
+        enum: ["Compact", "Detailed", "Modern"],
         default: "Modern",
       },
       storeNameFont: {
         type: String,
-        enum: ["Large", "Small"],
+        enum: ["Large", "Medium", "Small"],
         default: "Small",
       },
       //hasShow...
-      address: { type: Boolean, required: true },
-      phoneNumber: { type: Boolean, required: true },
-      billerName: { type: Boolean, required: true },
-      customerName: { type: Boolean, required: true },
-      customerPhone: { type: Boolean, required: true },
-      showMRP: { type: Boolean, required: true },
-      showSummary: { type: Boolean, required: true },
+      address: { type: Boolean, default: true },
+      phoneNumber: { type: Boolean, default: true },
+      billerName: { type: Boolean, default: true },
+      customerName: { type: Boolean, default: true },
+      customerPhone: { type: Boolean, default: true },
+      showMRP: { type: Boolean, default: true },
+      showSummary: { type: Boolean, default: true },
 
       footer1: {
         enabled: { type: Boolean, default: false },
@@ -47,11 +45,11 @@ const storeSchema = new mongoose.Schema(
     barcodeSetting: {
       template: {
         type: String,
-        enum: ["Modern", "Simple", "New"],
-        required: true,
+        enum: ["Compact", "Detailed", "Modern"],
+        default: "Modern",
       },
-      showStoreName: { type: Boolean, required: true },
-      showExpiryDate: { type: Boolean, default: "No" },
+      showStoreName: { type: Boolean, default: true },
+      showExpiryDate: { type: Boolean, default: false },
       barcodeSize: {
         type: String,
         enum: ["Small", "Medium", "Large"],
@@ -73,6 +71,16 @@ const storeSchema = new mongoose.Schema(
         default: "Small",
       },
     },
+
+    // Additional store information
+    website: { type: String, trim: true },
+    gstNumber: { type: String, trim: true },
+    panNumber: { type: String, trim: true },
+    establishedDate: { type: Date },
+    licenseNumber: { type: String, trim: true },
+    bankAccountNumber: { type: String, trim: true },
+    ifscCode: { type: String, trim: true },
+    upiId: { type: String, trim: true },
   },
   { timestamps: true }
 );

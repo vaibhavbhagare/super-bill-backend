@@ -5,6 +5,8 @@ const {
   getStoreById,
   updateStore,
   deleteStore,
+  updatePrintBillSettings,
+  updateBarcodeSettings,
 } = require("../controllers/storeController");
 
 const router = express.Router();
@@ -20,6 +22,12 @@ router.get("/:id", getStoreById);
 
 // Update
 router.put("/:id", updateStore);
+
+// Update Print Bill Settings
+router.put("/:id/print-bill-settings", updatePrintBillSettings);
+
+// Update Barcode Settings
+router.put("/:id/barcode-settings", updateBarcodeSettings);
 
 // Delete
 router.delete("/:id", deleteStore);

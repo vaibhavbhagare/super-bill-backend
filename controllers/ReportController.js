@@ -1,5 +1,9 @@
 const Invoice = require("../models/Invoice");
 const Product = require("../models/Product");
+<<<<<<< HEAD
+=======
+const mongoose = require("mongoose");
+>>>>>>> 42bfb91c2fecd4291be994bcf7f564c5e47f4f8f
 
 exports.getReport = async (req, res) => {
   try {
@@ -27,6 +31,7 @@ exports.getReport = async (req, res) => {
 
     const allowedPayment = ["PAID", "UNPAID"];
     const allowedTxn = ["ONLINE", "CASH", "CREDIT"];
+<<<<<<< HEAD
 
     const ps = norm(paymentStatus);
     const tx = norm(transactionType);
@@ -98,14 +103,136 @@ exports.getReport = async (req, res) => {
     const salesTrend = Object.entries(salesByDate)
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
       .map(([date, sales]) => ({ date, sales }));
+=======
 
-    const summary = {
-      totalSales,
-      totalProfit,
-      totalOrders: invoices.length,
+    const ps = norm(paymentStatus);
+    const tx = norm(transactionType);
+
+    if (ps && !allowedPayment.includes(ps)) {
+      return res.status(400).json({
+        message: "Invalid paymentStatus. Use PAID or UNPAID (case-insensitive).",
+      });
+    }
+
+    if (tx && !allowedTxn.includes(tx)) {
+      return res.status(400).json({
+        message: "Invalid transactionType. Use ONLINE, CASH, or CREDIT (case-insensitive).",
+      });
+    }
+>>>>>>> 42bfb91c2fecd4291be994bcf7f564c5e47f4f8f
+
+    // Build Mongo match filter
+    const match = {
+      deletedAt: null,
+      createdAt: { $gte: start, $lte: end },
     };
+    if (customerId) {
+      // Cast to ObjectId if valid
+      if (mongoose.Types.ObjectId.isValid(customerId)) {
+        match.customer = new mongoose.Types.ObjectId(customerId);
+      } else {
+        return res.status(400).json({ message: "Invalid customerId" });
+      }
+    }
+    if (billerId) match.billerId = billerId;
+    if (ps) match.paymentStatus = ps;
+    if (tx) match.transactionType = tx;
 
-    return res.json({ summary, salesTrend });
+    const pipeline = [
+      { $match: match },
+      {
+        $facet: {
+          // Compute totals and profits via line-level math
+          lineAgg: [
+            { $unwind: { path: "$buyingProducts", preserveNullAndEmptyArrays: true } },
+            {
+              $lookup: {
+                from: "products",
+                localField: "buyingProducts.product",
+                foreignField: "_id",
+                as: "_prod",
+              },
+            },
+            { $unwind: { path: "$_prod", preserveNullAndEmptyArrays: true } },
+            {
+              $addFields: {
+                _lineQty: { $ifNull: ["$buyingProducts.quantity", 0] },
+                _linePrice: { $ifNull: ["$buyingProducts.price", 0] },
+                _lineSubtotal: { $ifNull: ["$buyingProducts.subtotal", null] },
+                _purchasePrice: { $ifNull: ["$_prod.purchasePrice", 0] },
+              },
+            },
+            {
+              $addFields: {
+                _lineTotal: {
+                  $cond: [
+                    { $and: [ { $ne: ["$_lineSubtotal", null] }, { $not: { $gt: [ { $type: "$_lineSubtotal" }, "string" ] } } ] },
+                    "$_lineSubtotal",
+                    { $multiply: ["$_linePrice", "$_lineQty"] },
+                  ],
+                },
+                _lineProfit: {
+                  $multiply: [ { $subtract: ["$_linePrice", "$_purchasePrice"] }, "$_lineQty" ],
+                },
+              },
+            },
+            {
+              $group: {
+                _id: "$_id",
+                invoiceTotal: { $sum: { $ifNull: ["$_lineTotal", 0] } },
+                invoiceProfit: { $sum: { $ifNull: ["$_lineProfit", 0] } },
+              },
+            },
+            {
+              $group: {
+                _id: null,
+                totalSales: { $sum: "$invoiceTotal" },
+                totalProfit: { $sum: "$invoiceProfit" },
+                totalOrders: { $sum: 1 },
+              },
+            },
+          ],
+          // Sales trend by day using billingSummary.total (faster)
+          trendAgg: [
+            {
+              $group: {
+                _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+                sales: { $sum: { $ifNull: ["$billingSummary.total", 0] } },
+              },
+            },
+            { $sort: { _id: 1 } },
+          ],
+        },
+      },
+      {
+        $project: {
+          summary: {
+            $let: {
+              vars: { s: { $arrayElemAt: ["$lineAgg", 0] } },
+              in: {
+                totalSales: { $ifNull: ["$$s.totalSales", 0] },
+                totalProfit: { $ifNull: ["$$s.totalProfit", 0] },
+                totalOrders: { $ifNull: ["$$s.totalOrders", 0] },
+              },
+            },
+          },
+          salesTrend: {
+            $map: {
+              input: "$trendAgg",
+              as: "t",
+              in: { date: "$$t._id", sales: "$$t.sales" },
+            },
+          },
+        },
+      },
+    ];
+
+    const [result] = await Invoice.aggregate(pipeline).allowDiskUse(true);
+
+    return res.json({
+      summary: result?.summary || { totalSales: 0, totalProfit: 0, totalOrders: 0 },
+      salesTrend: result?.salesTrend || [],
+    });
   } catch (error) {
     console.error("Error generating report:", error);
     return res.status(500).json({ message: "Internal server error" });
