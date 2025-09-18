@@ -6,7 +6,7 @@ const productSchema = new mongoose.Schema(
     secondName: { type: String },
     barcode: { type: Number, required: true, unique: true },
     searchKey: { type: String, index: 'text' },
-    category: { type: String, required: true, index: true },
+    categories: [{ type: mongoose.Schema.Types.ObjectId, ref: "Category", index: true }],
     stock: { type: Number, required: true, default: 0 },
     mrp: { type: Number, required: true },
     sellingPrice1: { type: Number, required: true, index: true },
@@ -40,7 +40,6 @@ const productSchema = new mongoose.Schema(
 );
 
 // Compound indexes for better search performance
-productSchema.index({ category: 1, isActive: 1 });
 productSchema.index({ brand: 1, isActive: 1 });
 productSchema.index({ sellingPrice1: 1, isActive: 1 });
 productSchema.index({ createdAt: -1, isActive: 1 });

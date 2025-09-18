@@ -12,7 +12,10 @@ exports.createSalary = async (req, res) => {
 
 exports.getSalary = async (req, res) => {
   try {
-    const salary = await Salary.findById(req.params.id).populate("user");
+    const salary = await Salary.findOne({
+      _id: req.params.id,
+      $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
+    }).populate("user");
     if (!salary) return res.status(404).json({ error: "Not found" });
     res.json(salary);
   } catch (err) {
@@ -34,9 +37,16 @@ exports.updateSalary = async (req, res) => {
 
 exports.deleteSalary = async (req, res) => {
   try {
-    const salary = await Salary.findByIdAndDelete(req.params.id);
+    const salary = await Salary.softDelete(
+      req.params.id,
+      req.user?.userName || "system",
+    );
     if (!salary) return res.status(404).json({ error: "Not found" });
-    res.json({ message: "Deleted" });
+    res.json({ 
+      message: "Salary deleted",
+      deletedBy: req.user?.userName || "system",
+      deletedAt: new Date(),
+    });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -44,7 +54,9 @@ exports.deleteSalary = async (req, res) => {
 
 exports.listSalary = async (req, res) => {
   try {
-    const filter = {};
+    const filter = {
+      $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
+    };
     if (req.query.user) filter.user = req.query.user;
     if (req.query.month) filter.month = req.query.month;
     const salary = await Salary.find(filter).populate("user");
