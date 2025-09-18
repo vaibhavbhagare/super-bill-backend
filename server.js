@@ -17,6 +17,7 @@ const attendanceRoutes = require("./routes/attendanceRoutes");
 const salaryRoutes = require("./routes/salaryRoutes");
 const imageUpload = require("./routes/imageUpload");
 const ecommerceRoutes = require("./routes/ecommerceRoutes");
+const categoryRoutes = require("./routes/categoryRoutes");
 
 // const { requestLogger, errorLogger, performanceLogger } = require("./middleware/logger");
 
@@ -78,6 +79,7 @@ app.get("/api/health", (req, res) => {
 app.use("/api/users", userRoutes);
 app.use("/api/customers", customerRoutes);
 app.use("/api/products", productRoutes);
+app.use("/api/categories", categoryRoutes);
 app.use("/api/sync", syncRoutes);
 app.use("/api/invoices", invoiceRoutes);
 app.use("/api/stores", storeRoutes);

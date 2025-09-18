@@ -1,4 +1,5 @@
 const Product = require("../models/Product");
+const Category = require("../models/Category");
 const { Parser } = require("json2csv");
 // Create
 exports.createProduct = async (req, res) => {
@@ -9,8 +10,15 @@ exports.createProduct = async (req, res) => {
       const random = Math.floor(100 + Math.random() * 900);
       barcode = timestamp + random;
     }
+    // categories can be provided as categoryIds[] or legacy category name
+    let categories = [];
+    if (Array.isArray(req.body.categoryIds) && req.body.categoryIds.length) {
+      categories = req.body.categoryIds;
+    }
+
     const product = new Product({
       ...req.body,
+      categories,
       barcode,
       createdBy: req.user.userName, // Use logged-in user's username
       updatedBy: req.user.userName, // Initially same as createdBy
@@ -142,7 +150,7 @@ exports.getProducts = async (req, res) => {
     const sort = { updatedAt: -1 };
 
     const [products, total] = await Promise.all([
-      Product.find(filter).sort(sort).skip(skip).limit(limit),
+      Product.find(filter).sort(sort).skip(skip).limit(limit).populate('categories', 'name secondaryName slug'),
       Product.countDocuments(filter),
     ]);
 
@@ -162,7 +170,7 @@ exports.getProducts = async (req, res) => {
 // Read one
 exports.getProductById = async (req, res) => {
   try {
-    const product = await Product.findById(req.params.id);
+    const product = await Product.findById(req.params.id).populate('categories', 'name secondaryName slug');
     if (!product) return res.status(404).json({ error: "Product not found" });
     res.json(product);
   } catch (err) {
@@ -183,10 +191,14 @@ exports.getProductByBarcode = async (req, res) => {
 // Update
 exports.updateProduct = async (req, res) => {
   try {
+    // Handle categories updates: accept categoryIds[] or legacy category string
     const updateData = {
       ...req.body,
       updatedBy: req.user.userName, // Use logged-in user's username
     };
+    if (Array.isArray(req.body.categoryIds)) {
+      updateData.categories = req.body.categoryIds;
+    }
 
     const updated = await Product.findByIdAndUpdate(req.params.id, updateData, {
       new: true,
