@@ -6,6 +6,7 @@ const categorySchema = new mongoose.Schema(
     slug: { type: String, trim: true, default: undefined },
     secondaryName: { type: String, default: null, trim: true },
     subCategory: { type: [String], default: [] },
+    hasImage: { type: Boolean, default: false },
     isSynced: { type: Boolean },
     createdBy: String,
     deletedAt: { type: Date, default: null },
