@@ -2,6 +2,12 @@ const mongoose = require("mongoose");
 
 const storeSchema = new mongoose.Schema(
   {
+    storeId: { 
+      type: String, 
+      unique: true, 
+      required: true,
+      default: () => `STORE_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    },
     storeProfile: {
       storeName: { type: String, required: true, trim: true },
       storeAddress: { type: String, required: true, trim: true },
@@ -81,9 +87,31 @@ const storeSchema = new mongoose.Schema(
     bankAccountNumber: { type: String, trim: true },
     ifscCode: { type: String, trim: true },
     upiId: { type: String, trim: true },
+    
+    // Soft delete fields
+    deletedAt: { type: Date, default: null },
+    deletedBy: { type: String },
   },
   { timestamps: true }
 );
+
+// Add index for soft delete
+storeSchema.index({ deletedAt: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 30 });
+
+// Add soft delete method
+storeSchema.statics.softDelete = async function (id, deletedBy) {
+  return this.findByIdAndUpdate(
+    id,
+    {
+      $set: {
+        deletedAt: new Date(),
+        deletedBy,
+        updatedAt: new Date(),
+      },
+    },
+    { new: true },
+  );
+};
 
 // 👇 this prevents Mongoose from reusing the old model definition
 mongoose.models = {};

@@ -1,6 +1,7 @@
 const express = require("express");
 const {
   createStore,
+  getStore,
   getStores,
   getStoreById,
   updateStore,
@@ -17,8 +18,9 @@ router.use(auth);
 router.post("/", createStore);
 
 // Read
-router.get("/", getStores);
-router.get("/:id", getStoreById);
+router.get("/", getStore); // Get single store (returns store if exists, message if not)
+router.get("/all", getStores); // Get all stores (for admin purposes)
+router.get("/:id", getStoreById); // Get store by specific ID
 
 // Update
 router.put("/:id", updateStore);

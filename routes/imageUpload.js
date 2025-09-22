@@ -11,7 +11,9 @@ const upload = multer({ dest: "uploads/" });
 router.use(auth); // Apply auth middleware to all routes below
  
 router.post("/upload/:productId", upload.single("image"), imageUploadController.uploadProductImage);
+router.post("/upload/category/:categoryId", upload.single("image"), imageUploadController.uploadCategoryImage);
 
 // Delete image
 router.delete("/:productId", imageUploadController.deleteProductImage);
+router.delete("/category/:categoryId", imageUploadController.deleteCategoryImage);
 module.exports = router;

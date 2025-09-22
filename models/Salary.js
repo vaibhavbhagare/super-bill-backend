@@ -20,10 +20,32 @@ const SalarySchema = new mongoose.Schema(
     paid: { type: Boolean, default: false },
     paidAt: { type: Date },
     remarks: String,
+    
+    // Soft delete fields
+    deletedAt: { type: Date, default: null },
+    deletedBy: { type: String },
   },
   { timestamps: true },
 );
 
 SalarySchema.index({ user: 1, month: 1 }, { unique: true }); // Prevent duplicate salary for user/month
+
+// Add index for soft delete
+SalarySchema.index({ deletedAt: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 30 });
+
+// Add soft delete method
+SalarySchema.statics.softDelete = async function (id, deletedBy) {
+  return this.findByIdAndUpdate(
+    id,
+    {
+      $set: {
+        deletedAt: new Date(),
+        deletedBy,
+        updatedAt: new Date(),
+      },
+    },
+    { new: true },
+  );
+};
 
 module.exports = mongoose.model("Salary", SalarySchema);
