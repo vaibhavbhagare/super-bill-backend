@@ -1,6 +1,7 @@
 const Invoice = require("../models/Invoice");
 const Product = require("../models/Product");
 const Customer = require("../models/Customer");
+const ProductStats = require("../models/ProductStats");
 const whatsappService = require("./whatsappService");
 
 // Create Invoice
@@ -15,6 +16,7 @@ exports.createInvoice = async (req, res) => {
       sendWhatsappMessage,
       transactionType,
       paymentStatus,
+      channel = "POS",
       createdBy,
       updatedBy,
     } = req.body;
@@ -37,13 +39,17 @@ exports.createInvoice = async (req, res) => {
     const now = new Date();
     const month = monthNames[now.getMonth()];
     const billerShortName = billerName.slice(0, 3).toUpperCase() || "INV";
+    // Add date-time components to the prefix to avoid collisions (DDMMHHmmss)
+    const hours = String(now.getHours()).padStart(2, "0");
+    const minutes = String(now.getMinutes()).padStart(2, "0");
+    const seconds = String(now.getSeconds()).padStart(2, "0");
 
-    const prefix = `${month}-${billerShortName}-`;
+    const prefix = `${month}-${billerShortName}-${hours}${minutes}${seconds}-`;
     // Find the max invoiceNumber for this month
     const lastInvoice = await Invoice.findOne(
       { invoiceNumber: { $regex: `^${prefix}\\d{4}$` } },
       {},
-      { sort: { invoiceNumber: -1 } },
+      { sort: { invoiceNumber: -1 } }
     );
     let nextNumber = 1;
     if (lastInvoice && lastInvoice.invoiceNumber) {
@@ -72,7 +78,9 @@ exports.createInvoice = async (req, res) => {
 
       await Product.updateOne(
         { _id: product._id },
-        { $set: { stock: newStock } },
+        {
+          $set: { stock: newStock },
+        }
       );
     }
     // Decrement stock
@@ -89,10 +97,34 @@ exports.createInvoice = async (req, res) => {
         transactionType,
         invoiceNumber,
         paymentStatus,
+        channel,
         createdBy,
         updatedBy,
       });
       await invoice.save();
+
+      // Upsert product stats for reporting
+      const nowTs = new Date();
+      if (Array.isArray(buyingProducts) && buyingProducts.length) {
+        const ops = buyingProducts.map((item) => ({
+          updateOne: {
+            filter: { product: item.product },
+            update: {
+              $setOnInsert: { product: item.product },
+              $inc: {
+                totalUnitsSold: Number(item.quantity || 0),
+                totalTimesSold: 1,
+                ...(channel === "POS"
+                  ? { posUnitsSold: Number(item.quantity || 0), posTimesSold: 1 }
+                  : { onlineUnitsSold: Number(item.quantity || 0), onlineTimesSold: 1 }),
+              },
+              $set: { lastSoldAt: nowTs, lastInvoice: invoice._id },
+            },
+            upsert: true,
+          },
+        }));
+        await ProductStats.bulkWrite(ops);
+      }
 
       const customerData = await Customer.findById(customer);
 
@@ -153,7 +185,7 @@ exports.deleteInvoice = async (req, res) => {
   try {
     const invoice = await Invoice.softDelete(
       req.params.id,
-      req.user?.userName || "system",
+      req.user?.userName || "system"
     );
     if (!invoice) return res.status(404).json({ error: "Invoice not found" });
     res.json({ message: "Invoice deleted" });
@@ -241,7 +273,7 @@ exports.getInvoices = async (req, res) => {
       page,
       limit,
       totalPages: Math.ceil(
-        (req.query.customerName ? filteredInvoices.length : total) / limit,
+        (req.query.customerName ? filteredInvoices.length : total) / limit
       ),
     });
   } catch (err) {
