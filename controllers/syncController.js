@@ -40,6 +40,42 @@ async function getUserCollections(db) {
     .filter((name) => !["sync_meta", "system.indexes"].includes(name));
 }
 
+// Helper: natural key per collection for matching documents across databases
+function getNaturalKeyFilter(collectionName, doc) {
+  if (collectionName === "attendances") {
+    const dateVal = doc?.date ? new Date(doc.date) : null;
+    if (dateVal && !isNaN(dateVal.getTime())) {
+      // Match any document for the same user on the same calendar day
+      const startOfDay = new Date(
+        dateVal.getFullYear(),
+        dateVal.getMonth(),
+        dateVal.getDate(),
+        0,
+        0,
+        0,
+        0,
+      );
+      const endOfDay = new Date(
+        dateVal.getFullYear(),
+        dateVal.getMonth(),
+        dateVal.getDate() + 1,
+        0,
+        0,
+        0,
+        0,
+      );
+      return { user: doc.user, date: { $gte: startOfDay, $lt: endOfDay } };
+    }
+    // Fallback if date is missing/unparseable
+    return { user: doc.user, date: doc.date };
+  }
+  // productstats has a unique index on `product`, so use that as the natural key
+  if (collectionName === "productstats") {
+    return { product: doc.product };
+  }
+  return { _id: doc._id };
+}
+
 // GET /api/sync/status
 exports.getSyncStatus = async (req, res) => {
   let localClient, remoteClient;
@@ -199,8 +235,9 @@ exports.syncCollections = async (req, res) => {
         for (const localDoc of localChanges) {
           if (localDoc.deletedAt && localDoc.deletedAt !== null) {
             // Local is soft deleted, check if remote exists and is not deleted
+            const naturalKeyFilter = getNaturalKeyFilter(col, localDoc);
             const remoteDoc = await dbRemote.collection(col).findOne({
-              _id: localDoc._id,
+              ...naturalKeyFilter,
               $or: [
                 { deletedAt: { $exists: false } },
                 { deletedAt: null }
@@ -219,8 +256,9 @@ exports.syncCollections = async (req, res) => {
         for (const remoteDoc of remoteChanges) {
           if (remoteDoc.deletedAt && remoteDoc.deletedAt !== null) {
             // Remote is soft deleted, check if local exists and is not deleted
+            const naturalKeyFilter = getNaturalKeyFilter(col, remoteDoc);
             const localDoc = await dbLocal.collection(col).findOne({
-              _id: remoteDoc._id,
+              ...naturalKeyFilter,
               $or: [
                 { deletedAt: { $exists: false } },
                 { deletedAt: null }
@@ -238,10 +276,7 @@ exports.syncCollections = async (req, res) => {
 
         // 3. Merge local changes to remote
         for (const doc of localChanges) {
-          const naturalKeyFilter =
-            col === "attendances"
-              ? { user: doc.user, date: doc.date }
-              : { _id: doc._id };
+          const naturalKeyFilter = getNaturalKeyFilter(col, doc);
 
           const remoteDoc = await dbRemote
             .collection(col)
@@ -277,10 +312,7 @@ exports.syncCollections = async (req, res) => {
 
         // 4. Merge remote changes to local
         for (const doc of remoteChanges) {
-          const naturalKeyFilter =
-            col === "attendances"
-              ? { user: doc.user, date: doc.date }
-              : { _id: doc._id };
+          const naturalKeyFilter = getNaturalKeyFilter(col, doc);
 
           const localDoc = await dbLocal
             .collection(col)
@@ -318,10 +350,7 @@ exports.syncCollections = async (req, res) => {
         for (const conflict of conflictResolution) {
           if (conflict.type === 'local_deleted_remote_exists') {
             // Local is deleted, remote exists - soft delete remote
-            const naturalKeyFilter =
-              col === "attendances"
-                ? { user: conflict.localDoc.user, date: conflict.localDoc.date }
-                : { _id: conflict.localDoc._id };
+            const naturalKeyFilter = getNaturalKeyFilter(col, conflict.localDoc);
             
             await dbRemote.collection(col).updateOne(naturalKeyFilter, {
               $set: {
@@ -332,10 +361,7 @@ exports.syncCollections = async (req, res) => {
             });
           } else if (conflict.type === 'remote_deleted_local_exists') {
             // Remote is deleted, local exists - soft delete local
-            const naturalKeyFilter =
-              col === "attendances"
-                ? { user: conflict.remoteDoc.user, date: conflict.remoteDoc.date }
-                : { _id: conflict.remoteDoc._id };
+            const naturalKeyFilter = getNaturalKeyFilter(col, conflict.remoteDoc);
             
             await dbLocal.collection(col).updateOne(naturalKeyFilter, {
               $set: {
