@@ -17,6 +17,7 @@ const attendanceRoutes = require("./routes/attendanceRoutes");
 const salaryRoutes = require("./routes/salaryRoutes");
 const ecommerceRoutes = require("./routes/ecommerceRoutes");
 const categoryRoutes = require("./routes/categoryRoutes");
+const imageUpload = require("./routes/imageUpload");
 
 dotenv.config();
 
@@ -61,6 +62,8 @@ app.use("/api/salary", salaryRoutes);
 app.use("/api/ecommerce", ecommerceRoutes);
 app.use("/api/categories", categoryRoutes);
 
+
+app.use("/api/images", imageUpload);
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
