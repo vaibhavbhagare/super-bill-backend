@@ -17,7 +17,6 @@ const attendanceRoutes = require("./routes/attendanceRoutes");
 const salaryRoutes = require("./routes/salaryRoutes");
 const ecommerceRoutes = require("./routes/ecommerceRoutes");
 const categoryRoutes = require("./routes/categoryRoutes");
-const imageUpload = require("./routes/imageUpload");
 
 dotenv.config();
 
@@ -63,7 +62,11 @@ app.use("/api/ecommerce", ecommerceRoutes);
 app.use("/api/categories", categoryRoutes);
 
 
-app.use("/api/images", imageUpload);
+const isLocalOrDev = ["development", "local", "dev"].includes(process.env.NODE_ENV);
+if (isLocalOrDev) {
+  const imageUpload = require("./routes/imageUpload");
+  app.use("/api/images", imageUpload);
+}
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
