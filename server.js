@@ -52,7 +52,7 @@ app.use("/api/users", userRoutes);
 app.use("/api/customers", customerRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/sync", syncRoutes);
-app.use("/api", invoiceRoutes);
+app.use("/api/invoices", invoiceRoutes);
 app.use("/api/stores", storeRoutes);
 app.use("/api/reports", reportRoutes);
 
