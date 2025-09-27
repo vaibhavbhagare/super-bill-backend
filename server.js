@@ -12,6 +12,7 @@ const productRoutes = require("./routes/productRoutes");
 const syncRoutes = require("./routes/syncRoutes");
 const invoiceRoutes = require("./routes/invoiceRoutes");
 const storeRoutes = require("./routes/storeRouter");
+const reportRoutes = require("./routes/reportRoutes");
 
 dotenv.config();
 
@@ -49,7 +50,7 @@ app.use("/api/products", productRoutes);
 app.use("/api/sync", syncRoutes);
 app.use("/api", invoiceRoutes);
 app.use("/api/stores", storeRoutes);
-
+app.use("/api/reports", reportRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
