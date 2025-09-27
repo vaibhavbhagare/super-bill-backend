@@ -13,6 +13,9 @@ const syncRoutes = require("./routes/syncRoutes");
 const invoiceRoutes = require("./routes/invoiceRoutes");
 const storeRoutes = require("./routes/storeRouter");
 const reportRoutes = require("./routes/reportRoutes");
+const attendanceRoutes = require("./routes/attendanceRoutes");
+const salaryRoutes = require("./routes/salaryRoutes");
+
 
 dotenv.config();
 
@@ -51,6 +54,9 @@ app.use("/api/sync", syncRoutes);
 app.use("/api", invoiceRoutes);
 app.use("/api/stores", storeRoutes);
 app.use("/api/reports", reportRoutes);
+
+app.use("/api/attendance", attendanceRoutes);
+app.use("/api/salary", salaryRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
