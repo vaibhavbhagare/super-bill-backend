@@ -3,7 +3,44 @@ const Store = require("../models/store");
 // ✅ Create a Store
 exports.createStore = async (req, res) => {
   try {
-    const store = new Store(req.body);
+    // Check if a store already exists (including soft-deleted ones)
+    const existingStore = await Store.findOne({});
+    
+    if (existingStore) {
+      return res.status(409).json({
+        success: false,
+        message: "Only one store can be created. A store already exists in the database.",
+        existingStoreId: existingStore._id,
+      });
+    }
+
+    // Handle both flat and nested payload structures
+    const storeData = {
+      storeProfile: {
+        storeName: req.body.storeProfile?.storeName || req.body.storeName,
+        storeAddress: req.body.storeProfile?.storeAddress || req.body.storeAddress,
+        storePhone: req.body.storeProfile?.storePhone || req.body.storePhone,
+        isActive: req.body.storeProfile?.isActive || req.body.isActive || false,
+        storeOwnerName: req.body.storeProfile?.storeOwnerName || req.body.ownerName,
+        storeOwnerEmail: req.body.storeProfile?.storeOwnerEmail || req.body.email,
+        storeLogo: (req.body.storeProfile?.hasImage || req.body.hasImage) ? 
+          (req.body.storeProfile?.storeLogo || req.body.storeLogo) : null,
+      },
+      // Optional fields for initial store creation
+      printBillSetting: req.body.printBillSetting || {},
+      barcodeSetting: req.body.barcodeSetting || {},
+      // Additional fields from payload
+      website: req.body.website,
+      gstNumber: req.body.gstNumber,
+      panNumber: req.body.panNumber,
+      establishedDate: req.body.establishedDate,
+      licenseNumber: req.body.licenseNumber,
+      bankAccountNumber: req.body.bankAccountNumber,
+      ifscCode: req.body.ifscCode,
+      upiId: req.body.upiId,
+    };
+
+    const store = new Store(storeData);
     const savedStore = await store.save();
     res.status(201).json({
       success: true,
@@ -19,10 +56,49 @@ exports.createStore = async (req, res) => {
   }
 };
 
+// ✅ Get Store (single store - returns store if exists, message if not)
+exports.getStore = async (req, res) => {
+  try {
+    // Find the single store (excluding soft-deleted)
+    const filter = {
+      $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
+    };
+    
+    const store = await Store.findOne(filter);
+    
+    if (!store) {
+      return res.status(200).json({
+        success: true,
+        message: "No store found. Please create a store first.",
+        data: null,
+        storeExists: false,
+      });
+    }
+    
+    res.status(200).json({
+      success: true,
+      message: "Store found successfully",
+      data: store,
+      storeExists: true,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch store",
+      error: error.message,
+    });
+  }
+};
+
 // ✅ Get all Stores
 exports.getStores = async (req, res) => {
   try {
-    const stores = await Store.find().sort({ createdAt: -1 });
+    // Filter out soft-deleted stores
+    const filter = {
+      $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
+    };
+    
+    const stores = await Store.find(filter).sort({ createdAt: -1 });
     res.status(200).json({
       success: true,
       count: stores.length,
@@ -40,7 +116,10 @@ exports.getStores = async (req, res) => {
 // ✅ Get Store by ID
 exports.getStoreById = async (req, res) => {
   try {
-    const store = await Store.findById(req.params.id);
+    const store = await Store.findOne({
+      _id: req.params.id,
+      $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
+    });
     if (!store) {
       return res.status(404).json({
         success: false,
@@ -91,7 +170,10 @@ exports.updateStore = async (req, res) => {
 // ✅ Delete Store
 exports.deleteStore = async (req, res) => {
   try {
-    const deletedStore = await Store.findByIdAndDelete(req.params.id);
+    const deletedStore = await Store.softDelete(
+      req.params.id,
+      req.user?.userName || "system",
+    );
     if (!deletedStore) {
       return res.status(404).json({
         success: false,
@@ -101,11 +183,69 @@ exports.deleteStore = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Store deleted successfully",
+      deletedBy: req.user?.userName || "system",
+      deletedAt: new Date(),
     });
   } catch (error) {
     res.status(500).json({
       success: false,
       message: "Failed to delete store",
+      error: error.message,
+    });
+  }
+};
+
+// ✅ Update Print Bill Settings
+exports.updatePrintBillSettings = async (req, res) => {
+  try {
+    const updatedStore = await Store.findByIdAndUpdate(
+      req.params.id,
+      { printBillSetting: req.body },
+      { new: true, runValidators: true }
+    );
+    if (!updatedStore) {
+      return res.status(404).json({
+        success: false,
+        message: "Store not found",
+      });
+    }
+    res.status(200).json({
+      success: true,
+      message: "Print bill settings updated successfully",
+      data: updatedStore,
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: "Failed to update print bill settings",
+      error: error.message,
+    });
+  }
+};
+
+// ✅ Update Barcode Settings
+exports.updateBarcodeSettings = async (req, res) => {
+  try {
+    const updatedStore = await Store.findByIdAndUpdate(
+      req.params.id,
+      { barcodeSetting: req.body },
+      { new: true, runValidators: true }
+    );
+    if (!updatedStore) {
+      return res.status(404).json({
+        success: false,
+        message: "Store not found",
+      });
+    }
+    res.status(200).json({
+      success: true,
+      message: "Barcode settings updated successfully",
+      data: updatedStore,
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: "Failed to update barcode settings",
       error: error.message,
     });
   }

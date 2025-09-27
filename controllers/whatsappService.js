@@ -1,7 +1,7 @@
 const twilio = require("twilio");
-const accountSid = process.env.TWILIO_ACCOUNT_SID;
-const authToken = process.env.TWILIO_AUTH_TOKEN;
-const client = accountSid && authToken ? new twilio(accountSid, authToken) : null;
+const accountSid = "AC579d13b5f9faef79cf3d789d24d5fca9";
+const authToken = "513dbba59279e3fa417048065af4c981";
+const client = new twilio(accountSid, authToken);
 const axios = require("axios");
 
 exports.sendWhatsAppMessage = async (
@@ -11,10 +11,6 @@ exports.sendWhatsAppMessage = async (
   imageUrl,
 ) => {
   try {
-    if (!client) {
-      console.warn("Twilio not configured. Skipping WhatsApp message send.");
-      return;
-    }
     const messageBody = `नमस्कार ${customerName},
 *भगरे सुपर मार्केट* कडून आपल्याकडून झालेल्या पेमेंटची माहिती खालीलप्रमाणे आहे:
 चलन रक्कम: ₹${amount}

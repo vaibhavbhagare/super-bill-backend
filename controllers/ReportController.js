@@ -1,5 +1,7 @@
 const Invoice = require("../models/Invoice");
 const Product = require("../models/Product");
+const ProductStats = require("../models/ProductStats");
+const mongoose = require("mongoose");
 
 exports.getReport = async (req, res) => {
   try {
@@ -43,69 +45,118 @@ exports.getReport = async (req, res) => {
       });
     }
 
-    // Build Mongo filter
-    const filter = {
-      deletedAt: null, // exclude soft-deleted
+    // Build Mongo match filter
+    const match = {
+      deletedAt: null,
       createdAt: { $gte: start, $lte: end },
     };
-    if (customerId) filter.customer = customerId;
-    if (billerId) filter.billerId = billerId;
-    if (ps) filter.paymentStatus = ps;
-    if (tx) filter.transactionType = tx;
-
-    // Query: populate only needed fields for profit calc
-    const invoices = await Invoice.find(filter)
-      .populate({
-        path: "buyingProducts.product",
-        select: "purchasePrice",
-      })
-      .lean();
-
-    let totalSales = 0;
-    let totalProfit = 0;
-    const salesByDate = Object.create(null);
-
-    for (const invoice of invoices) {
-      // Per-item sums
-      for (const item of invoice.buyingProducts || []) {
-        const qty = Number(item.quantity) || 0;
-        const sell = Number(item.price) || 0;
-        console.log(invoice.buyingProducts)
-        // Prefer provided subtotal if you store it, otherwise compute
-        const lineTotal =
-          typeof item.subtotal === "number" && !Number.isNaN(item.subtotal)
-            ? item.subtotal
-            : sell * qty;
-
-        const purchasePrice =
-          (item.product && Number(item.product.purchasePrice)) || 0;
-        const lineProfit = (sell - purchasePrice) * qty;
-
-        totalSales += lineTotal;
-        totalProfit += lineProfit;
+    if (customerId) {
+      // Cast to ObjectId if valid
+      if (mongoose.Types.ObjectId.isValid(customerId)) {
+        match.customer = new mongoose.Types.ObjectId(customerId);
+      } else {
+        return res.status(400).json({ message: "Invalid customerId" });
       }
-
-      // Trend by YYYY-MM-DD (UTC date). If you want IST, adjust here.
-      const dateKey = new Date(invoice.createdAt).toISOString().slice(0, 10);
-      if (!salesByDate[dateKey]) salesByDate[dateKey] = 0;
-
-      // Use billingSummary.total if present; fallback to per-item sum for that invoice
-      const invoiceTotal =
-        (invoice.billingSummary && Number(invoice.billingSummary.total)) || 0;
-      salesByDate[dateKey] += invoiceTotal || 0;
     }
+    if (billerId) match.billerId = billerId;
+    if (ps) match.paymentStatus = ps;
+    if (tx) match.transactionType = tx;
 
-    const salesTrend = Object.entries(salesByDate)
-      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-      .map(([date, sales]) => ({ date, sales }));
+    const pipeline = [
+      { $match: match },
+      {
+        $facet: {
+          // Compute totals and profits via line-level math
+          lineAgg: [
+            { $unwind: { path: "$buyingProducts", preserveNullAndEmptyArrays: true } },
+            {
+              $lookup: {
+                from: "products",
+                localField: "buyingProducts.product",
+                foreignField: "_id",
+                as: "_prod",
+              },
+            },
+            { $unwind: { path: "$_prod", preserveNullAndEmptyArrays: true } },
+            {
+              $addFields: {
+                _lineQty: { $ifNull: ["$buyingProducts.quantity", 0] },
+                _linePrice: { $ifNull: ["$buyingProducts.price", 0] },
+                _lineSubtotal: { $ifNull: ["$buyingProducts.subtotal", null] },
+                _purchasePrice: { $ifNull: ["$_prod.purchasePrice", 0] },
+              },
+            },
+            {
+              $addFields: {
+                _lineTotal: {
+                  $cond: [
+                    { $and: [ { $ne: ["$_lineSubtotal", null] }, { $not: { $gt: [ { $type: "$_lineSubtotal" }, "string" ] } } ] },
+                    "$_lineSubtotal",
+                    { $multiply: ["$_linePrice", "$_lineQty"] },
+                  ],
+                },
+                _lineProfit: {
+                  $multiply: [ { $subtract: ["$_linePrice", "$_purchasePrice"] }, "$_lineQty" ],
+                },
+              },
+            },
+            {
+              $group: {
+                _id: "$_id",
+                invoiceTotal: { $sum: { $ifNull: ["$_lineTotal", 0] } },
+                invoiceProfit: { $sum: { $ifNull: ["$_lineProfit", 0] } },
+              },
+            },
+            {
+              $group: {
+                _id: null,
+                totalSales: { $sum: "$invoiceTotal" },
+                totalProfit: { $sum: "$invoiceProfit" },
+                totalOrders: { $sum: 1 },
+              },
+            },
+          ],
+          // Sales trend by day using billingSummary.total (faster)
+          trendAgg: [
+            {
+              $group: {
+                _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+                sales: { $sum: { $ifNull: ["$billingSummary.total", 0] } },
+              },
+            },
+            { $sort: { _id: 1 } },
+          ],
+        },
+      },
+      {
+        $project: {
+          summary: {
+            $let: {
+              vars: { s: { $arrayElemAt: ["$lineAgg", 0] } },
+              in: {
+                totalSales: { $ifNull: ["$$s.totalSales", 0] },
+                totalProfit: { $ifNull: ["$$s.totalProfit", 0] },
+                totalOrders: { $ifNull: ["$$s.totalOrders", 0] },
+              },
+            },
+          },
+          salesTrend: {
+            $map: {
+              input: "$trendAgg",
+              as: "t",
+              in: { date: "$$t._id", sales: "$$t.sales" },
+            },
+          },
+        },
+      },
+    ];
 
-    const summary = {
-      totalSales,
-      totalProfit,
-      totalOrders: invoices.length,
-    };
+    const [result] = await Invoice.aggregate(pipeline).allowDiskUse(true);
 
-    return res.json({ summary, salesTrend });
+    return res.json({
+      summary: result?.summary || { totalSales: 0, totalProfit: 0, totalOrders: 0 },
+      salesTrend: result?.salesTrend || [],
+    });
   } catch (error) {
     console.error("Error generating report:", error);
     return res.status(500).json({ message: "Internal server error" });
@@ -126,46 +177,115 @@ const daysAgo = (days) => {
 
 exports.getProductStatsReport = async (req, res) => {
   try {
-    const NOT_SOLD_DAYS = parseInt(
-      req.query.notSoldDays || req.body?.notSoldDays || NOT_SOLD_DAYS_DEFAULT
-    );
-
-    const LOW_STOCK = parseInt(
-      req.query.lowStock || req.body?.lowStock || LOW_STOCK_THRESHOLD_DEFAULT
-    );
+    // Support similar filters as getReport where applicable
+    // NOTE: ProductStats stores totals, not per-invoice details, so only
+    // lastSoldAt range and channel (mapped from transactionType) are supported.
+    let { startDate, endDate, transactionType, limit } = req.query;
 
     const today = new Date();
-    const notSoldSince = daysAgo(NOT_SOLD_DAYS);
+    const start = startDate ? new Date(startDate) : new Date(today.getFullYear(), today.getMonth(), 1);
+    start.setHours(0, 0, 0, 0);
+    const end = endDate ? new Date(endDate) : today;
+    end.setHours(23, 59, 59, 999);
 
-    const expiredProducts = await Product.find({
-      expiryDate: { $lt: today },
-      deletedAt: null,
-    }).select("_id name secondName stock expiryDate");
+    const norm = (v) => (typeof v === "string" ? v.trim().toUpperCase() : null);
+    const tx = norm(transactionType);
+    // Map transactionType -> channel for ProductStats fields
+    // ONLINE -> online fields; CASH/CREDIT/others -> POS fields; null -> total fields
+    const isOnline = tx === "ONLINE";
+    const useChannelBreakdown = Boolean(tx);
 
-    const lowStockProducts = await Product.find({
-      stock: { $lt: LOW_STOCK },
-      deletedAt: null,
-    }).select("_id name secondName stock");
+    const match = { lastSoldAt: { $gte: start, $lte: end } };
 
-    const notSoldProducts = await Product.find({
-      updatedAt: { $lt: notSoldSince },
-      deletedAt: null,
-    }).select("_id name secondName stock updatedAt");
+    const topLimit = Math.min(Math.max(parseInt(limit || "10", 10), 1), 100);
 
-    res.json({
-      expired: {
-        count: expiredProducts.length,
-        products: expiredProducts,
+    const pipeline = [
+      { $match: match },
+      {
+        $lookup: {
+          from: "products",
+          localField: "product",
+          foreignField: "_id",
+          as: "_prod",
+        },
       },
-      lowStock: {
-        count: lowStockProducts.length,
-        products: lowStockProducts,
+      { $unwind: { path: "$_prod", preserveNullAndEmptyArrays: true } },
+      {
+        $addFields: {
+          _units: useChannelBreakdown
+            ? (isOnline ? "$onlineUnitsSold" : "$posUnitsSold")
+            : "$totalUnitsSold",
+          _times: useChannelBreakdown
+            ? (isOnline ? "$onlineTimesSold" : "$posTimesSold")
+            : "$totalTimesSold",
+        },
       },
-      notSoldRecently: {
-        since: `${NOT_SOLD_DAYS} days ago`,
-        count: notSoldProducts.length,
-        products: notSoldProducts,
+      {
+        $facet: {
+          topProducts: [
+            {
+              $project: {
+                _id: 0,
+                productId: "$product",
+                name: "$_prod.name",
+                secondName: "$_prod.secondName",
+                stock: "$_prod.stock",
+                unitsSold: { $ifNull: ["$_units", 0] },
+                timesSold: { $ifNull: ["$_times", 0] },
+                lastSoldAt: "$lastSoldAt",
+                lastInvoice: "$lastInvoice",
+              },
+            },
+            { $sort: { unitsSold: -1 } },
+            { $limit: topLimit },
+          ],
+          summary: [
+            {
+              $group: {
+                _id: null,
+                totalUnitsSold: { $sum: { $ifNull: ["$_units", 0] } },
+                totalTimesSold: { $sum: { $ifNull: ["$_times", 0] } },
+                uniqueProductsSold: {
+                  $sum: { $cond: [{ $gt: [{ $ifNull: ["$_units", 0] }, 0] }, 1, 0] },
+                },
+              },
+            },
+          ],
+        },
       },
+      {
+        $project: {
+          topProducts: 1,
+          summary: {
+            $let: {
+              vars: { s: { $arrayElemAt: ["$summary", 0] } },
+              in: {
+                totalUnitsSold: { $ifNull: ["$$s.totalUnitsSold", 0] },
+                totalTimesSold: { $ifNull: ["$$s.totalTimesSold", 0] },
+                uniqueProductsSold: { $ifNull: ["$$s.uniqueProductsSold", 0] },
+                scope: useChannelBreakdown ? (isOnline ? "ONLINE" : "POS") : "TOTAL",
+                dateRange: {
+                  start,
+                  end,
+                },
+              },
+            },
+          },
+        },
+      },
+    ];
+
+    const [result] = await ProductStats.aggregate(pipeline).allowDiskUse(true);
+
+    return res.json({
+      summary: result?.summary || {
+        totalUnitsSold: 0,
+        totalTimesSold: 0,
+        uniqueProductsSold: 0,
+        scope: useChannelBreakdown ? (isOnline ? "ONLINE" : "POS") : "TOTAL",
+        dateRange: { start, end },
+      },
+      topProducts: result?.topProducts || [],
     });
   } catch (error) {
     console.error("Error fetching product stats:", error);

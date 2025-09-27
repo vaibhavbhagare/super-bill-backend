@@ -12,9 +12,10 @@ exports.createAttendance = async (req, res) => {
 
 exports.getAttendance = async (req, res) => {
   try {
-    const attendance = await Attendance.findById(req.params.id).populate(
-      "user",
-    );
+    const attendance = await Attendance.findOne({
+      _id: req.params.id,
+      $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
+    }).populate("user");
     if (!attendance) return res.status(404).json({ error: "Not found" });
     res.json(attendance);
   } catch (err) {
@@ -38,9 +39,16 @@ exports.updateAttendance = async (req, res) => {
 
 exports.deleteAttendance = async (req, res) => {
   try {
-    const attendance = await Attendance.findByIdAndDelete(req.params.id);
+    const attendance = await Attendance.softDelete(
+      req.params.id,
+      req.user?.userName || "system",
+    );
     if (!attendance) return res.status(404).json({ error: "Not found" });
-    res.json({ message: "Deleted" });
+    res.json({ 
+      message: "Attendance deleted",
+      deletedBy: req.user?.userName || "system",
+      deletedAt: new Date(),
+    });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -48,7 +56,9 @@ exports.deleteAttendance = async (req, res) => {
 
 exports.listAttendance = async (req, res) => {
   try {
-    const filter = {};
+    const filter = {
+      $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
+    };
     if (req.query.user) filter.user = req.query.user;
     if (req.query.date) filter.date = req.query.date;
     const attendance = await Attendance.find(filter).populate("user");
