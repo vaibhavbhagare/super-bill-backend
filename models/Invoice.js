@@ -43,6 +43,12 @@ const invoiceSchema = new mongoose.Schema(
       enum: ["PAID", "UNPAID"],
       default: "PAID",
     }, // optional
+    channel: {
+      type: String,
+      enum: ["POS", "ONLINE"],
+      default: "POS",
+      index: true,
+    },
     createdBy: { type: String, required: true },
     updatedBy: { type: String },
     deletedAt: { type: Date, default: null },
