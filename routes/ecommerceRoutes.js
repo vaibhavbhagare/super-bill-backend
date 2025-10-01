@@ -30,6 +30,12 @@ router.get("/products/:id",
   ecommerceController.getProductById
 );
 
+// Categories for e-commerce
+router.get("/categories",
+  productSearchLimiter,
+  ecommerceController.getCategories
+);
+
  
  
 

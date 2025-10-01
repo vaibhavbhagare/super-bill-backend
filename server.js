@@ -58,7 +58,7 @@ app.use("/api/reports", reportRoutes);
 
 app.use("/api/attendance", attendanceRoutes);
 app.use("/api/salary", salaryRoutes);
-app.use("/api/ecommerce", ecommerceRoutes);
+app.use("/api/ecomm", ecommerceRoutes);
 app.use("/api/categories", categoryRoutes);
 
 
