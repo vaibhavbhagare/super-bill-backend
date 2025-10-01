@@ -5,7 +5,8 @@ const {
   productSearchLimiter,
   productDetailLimiter,
   validateEcommerceRequest,
-  sanitizeEcommerceResponse
+  sanitizeEcommerceResponse,
+  categoriesListLimiter
 } = require("../middleware/ecommerceSecurity");
 
 // Apply security middleware to all routes
@@ -32,7 +33,7 @@ router.get("/products/:id",
 
 // Categories for e-commerce
 router.get("/categories",
-  productSearchLimiter,
+  categoriesListLimiter,
   ecommerceController.getCategories
 );
 

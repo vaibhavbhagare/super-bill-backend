@@ -252,13 +252,32 @@ module.exports = {
   getProducts,
   getProductById,
   getProductFilters,
-  // Public API - Get all categories for e-commerce
+  // Public API - Get all categories for e-commerce (with cache and cache headers)
   async getCategories(req, res) {
     try {
+      // Simple in-memory cache for 5 minutes
+      if (!global.__ecommCache) {
+        global.__ecommCache = Object.create(null);
+      }
+      const cacheKey = "categories_all_v1";
+      const cached = global.__ecommCache[cacheKey];
+      const now = Date.now();
+      const ttlMs = 5 * 60 * 1000; // 5 minutes
+      if (cached && (now - cached.ts) < ttlMs) {
+        res.set("Cache-Control", "public, max-age=60, s-maxage=60");
+        return res.json({ success: true, data: cached.value });
+      }
+
       const categories = await Category.find({ deletedAt: null })
         .select("_id name secondaryName slug hasImage")
         .sort({ name: 1 })
         .lean();
+
+      // Save to cache
+      global.__ecommCache[cacheKey] = { ts: now, value: categories };
+
+      // Short CDN/browser cache to smooth bursts without risking staleness
+      res.set("Cache-Control", "public, max-age=60, s-maxage=60");
 
       res.json({
         success: true,

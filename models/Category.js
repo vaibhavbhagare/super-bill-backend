@@ -20,6 +20,9 @@ const categorySchema = new mongoose.Schema(
 // TTL index to purge soft-deleted docs after 30 days
 categorySchema.index({ deletedAt: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 30 });
 
+// Support common query pattern: { deletedAt: null } sorted by name
+categorySchema.index({ deletedAt: 1, name: 1 });
+
 categorySchema.statics.softDelete = async function (id, deletedBy) {
   return this.findByIdAndUpdate(
     id,
