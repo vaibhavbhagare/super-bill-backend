@@ -13,6 +13,7 @@ const invoiceSchema = new mongoose.Schema(
         secondName: String,
         quantity: { type: Number, required: true },
         price: { type: Number, required: true }, // selling price at time of sale
+        purchasePrice: { type: Number, required: true }, // purchase price at time of sale
         mrp: Number,
         discount: Number,
         subtotal: Number,

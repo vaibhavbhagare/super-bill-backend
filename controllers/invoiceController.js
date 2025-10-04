@@ -61,7 +61,8 @@ exports.createInvoice = async (req, res) => {
     }
     const invoiceNumber = `${prefix}${String(nextNumber).padStart(4, "0")}`;
 
-    // Check stock for each product
+    // Check stock for each product and populate purchasePrice
+    const enrichedBuyingProducts = [];
     for (const item of buyingProducts) {
       const product = await Product.findById(item.product);
       if (!product) {
@@ -69,6 +70,7 @@ exports.createInvoice = async (req, res) => {
           .status(404)
           .json({ error: `Product not found: ${item.product}` });
       }
+      
       // 👇 Convert to numbers to avoid string math bugs
       const currentStock = Number(product.stock || 0);
       const orderedQty = Number(item.quantity || 0);
@@ -82,13 +84,19 @@ exports.createInvoice = async (req, res) => {
           $set: { stock: newStock },
         }
       );
+
+      // Add purchasePrice to the enriched product data
+      enrichedBuyingProducts.push({
+        ...item,
+        purchasePrice: Number(product.purchasePrice || 0), // Save historical purchase price
+      });
     }
     // Decrement stock
 
     // Try to create invoice
     try {
       const invoice = new Invoice({
-        buyingProducts,
+        buyingProducts: enrichedBuyingProducts,
         customer,
         billingSummary,
         billerId,
@@ -105,8 +113,8 @@ exports.createInvoice = async (req, res) => {
 
       // Upsert product stats for reporting
       const nowTs = new Date();
-      if (Array.isArray(buyingProducts) && buyingProducts.length) {
-        const ops = buyingProducts.map((item) => ({
+      if (Array.isArray(enrichedBuyingProducts) && enrichedBuyingProducts.length) {
+        const ops = enrichedBuyingProducts.map((item) => ({
           updateOne: {
             filter: { product: item.product },
             update: {

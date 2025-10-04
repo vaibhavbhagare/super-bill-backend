@@ -83,7 +83,7 @@ exports.getReport = async (req, res) => {
                 _lineQty: { $ifNull: ["$buyingProducts.quantity", 0] },
                 _linePrice: { $ifNull: ["$buyingProducts.price", 0] },
                 _lineSubtotal: { $ifNull: ["$buyingProducts.subtotal", null] },
-                _purchasePrice: { $ifNull: ["$_prod.purchasePrice", 0] },
+                _purchasePrice: { $ifNull: ["$buyingProducts.purchasePrice", { $ifNull: ["$_prod.purchasePrice", 0] }] },
               },
             },
             {
