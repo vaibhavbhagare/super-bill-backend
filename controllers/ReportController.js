@@ -166,7 +166,7 @@ exports.getReport = async (req, res) => {
 
 
 
-const NOT_SOLD_DAYS_DEFAULT = 35; // default value if not provided in query/body
+const NOT_SOLD_DAYS_DEFAULT = 35;
 const LOW_STOCK_THRESHOLD_DEFAULT = 5;
 
 const daysAgo = (days) => {
@@ -177,27 +177,26 @@ const daysAgo = (days) => {
 
 exports.getProductStatsReport = async (req, res) => {
   try {
-    // Support similar filters as getReport where applicable
-    // NOTE: ProductStats stores totals, not per-invoice details, so only
-    // lastSoldAt range and channel (mapped from transactionType) are supported.
-    let { startDate, endDate, transactionType, limit } = req.query;
+    let { startDate, endDate, transactionType, limit, lowStock, notSoldDays } = req.query;
 
     const today = new Date();
-    const start = startDate ? new Date(startDate) : new Date(today.getFullYear(), today.getMonth(), 1);
+    const start = startDate
+      ? new Date(startDate)
+      : new Date(today.getFullYear(), today.getMonth(), 1);
     start.setHours(0, 0, 0, 0);
     const end = endDate ? new Date(endDate) : today;
     end.setHours(23, 59, 59, 999);
 
     const norm = (v) => (typeof v === "string" ? v.trim().toUpperCase() : null);
     const tx = norm(transactionType);
-    // Map transactionType -> channel for ProductStats fields
-    // ONLINE -> online fields; CASH/CREDIT/others -> POS fields; null -> total fields
     const isOnline = tx === "ONLINE";
     const useChannelBreakdown = Boolean(tx);
 
-    const match = { lastSoldAt: { $gte: start, $lte: end } };
-
     const topLimit = Math.min(Math.max(parseInt(limit || "10", 10), 1), 100);
+    const lowStockThreshold = parseInt(lowStock || LOW_STOCK_THRESHOLD_DEFAULT, 10);
+    const notSellingDays = parseInt(notSoldDays || NOT_SOLD_DAYS_DEFAULT, 10);
+
+    const match = { lastSoldAt: { $gte: start, $lte: end } };
 
     const pipeline = [
       { $match: match },
@@ -230,6 +229,7 @@ exports.getProductStatsReport = async (req, res) => {
                 name: "$_prod.name",
                 secondName: "$_prod.secondName",
                 stock: "$_prod.stock",
+                expiryDate: "$_prod.expiryDate",
                 unitsSold: { $ifNull: ["$_units", 0] },
                 timesSold: { $ifNull: ["$_times", 0] },
                 lastSoldAt: "$lastSoldAt",
@@ -238,6 +238,48 @@ exports.getProductStatsReport = async (req, res) => {
             },
             { $sort: { unitsSold: -1 } },
             { $limit: topLimit },
+          ],
+          expiredProducts: [
+            { $match: { "_prod.expiryDate": { $lt: today } } },
+            {
+              $project: {
+                productId: "$product",
+                name: "$_prod.name",
+                secondName: "$_prod.secondName",
+                stock: "$_prod.stock",
+                expiryDate: "$_prod.expiryDate",
+              },
+            },
+          ],
+          lowStockProducts: [
+            { $match: { "_prod.stock": { $lte: lowStockThreshold } } },
+            {
+              $project: {
+                productId: "$product",
+                name: "$_prod.name",
+                secondName: "$_prod.secondName",
+                stock: "$_prod.stock",
+              },
+            },
+          ],
+          notSellingProducts: [
+            {
+              $match: {
+                $or: [
+                  { lastSoldAt: null },
+                  { lastSoldAt: { $lt: daysAgo(notSellingDays) } },
+                ],
+              },
+            },
+            {
+              $project: {
+                productId: "$product",
+                name: "$_prod.name",
+                secondName: "$_prod.secondName",
+                stock: "$_prod.stock",
+                lastSoldAt: "$lastSoldAt",
+              },
+            },
           ],
           summary: [
             {
@@ -256,6 +298,9 @@ exports.getProductStatsReport = async (req, res) => {
       {
         $project: {
           topProducts: 1,
+          expiredProducts: 1,
+          lowStockProducts: 1,
+          notSellingProducts: 1,
           summary: {
             $let: {
               vars: { s: { $arrayElemAt: ["$summary", 0] } },
@@ -264,10 +309,7 @@ exports.getProductStatsReport = async (req, res) => {
                 totalTimesSold: { $ifNull: ["$$s.totalTimesSold", 0] },
                 uniqueProductsSold: { $ifNull: ["$$s.uniqueProductsSold", 0] },
                 scope: useChannelBreakdown ? (isOnline ? "ONLINE" : "POS") : "TOTAL",
-                dateRange: {
-                  start,
-                  end,
-                },
+                dateRange: { start, end },
               },
             },
           },
@@ -278,18 +320,16 @@ exports.getProductStatsReport = async (req, res) => {
     const [result] = await ProductStats.aggregate(pipeline).allowDiskUse(true);
 
     return res.json({
-      summary: result?.summary || {
-        totalUnitsSold: 0,
-        totalTimesSold: 0,
-        uniqueProductsSold: 0,
-        scope: useChannelBreakdown ? (isOnline ? "ONLINE" : "POS") : "TOTAL",
-        dateRange: { start, end },
-      },
+      summary: result?.summary || {},
       topProducts: result?.topProducts || [],
+      expiredProducts: result?.expiredProducts || [],
+      lowStockProducts: result?.lowStockProducts || [],
+      notSellingProducts: result?.notSellingProducts || [],
     });
   } catch (error) {
     console.error("Error fetching product stats:", error);
     res.status(500).json({ error: "Internal Server Error" });
   }
 };
+
 
