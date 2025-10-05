@@ -18,6 +18,7 @@ const salaryRoutes = require("./routes/salaryRoutes");
 const imageUpload = require("./routes/imageUpload");
 const ecommerceRoutes = require("./routes/ecommerceRoutes");
 const categoryRoutes = require("./routes/categoryRoutes");
+const expenseRoutes = require("./routes/expenseRoutes");
 
 // const { requestLogger, errorLogger, performanceLogger } = require("./middleware/logger");
 
@@ -80,6 +81,7 @@ app.use("/api/users", userRoutes);
 app.use("/api/customers", customerRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/categories", categoryRoutes);
+app.use("/api/expenses", expenseRoutes);
 app.use("/api/sync", syncRoutes);
 app.use("/api/invoices", invoiceRoutes);
 app.use("/api/stores", storeRoutes);
