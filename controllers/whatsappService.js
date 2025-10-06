@@ -1,7 +1,10 @@
 const twilio = require("twilio");
-const accountSid = "ACa2ad0f31d5591b9d31b8cd89adcee15c";
-const authToken = "cef767502681697a32a854062265b7b6";
-const client = new twilio(accountSid, authToken);
+// const accountSid = "ACa2ad0f31d5591b9d31b8cd89adcee15c";
+// const authToken = "cef767502681697a32a854062265b7b6";
+const client = new twilio(
+  process.env.TWILIO_ACCOUNT_SID,
+  process.env.TWILIO_AUTH_TOKEN
+);
 const axios = require("axios");
 
 exports.sendWhatsAppMessageTwilio = async (invoice, customer) => {
@@ -25,9 +28,9 @@ exports.sendWhatsAppMessageTwilio = async (invoice, customer) => {
       storeInfo
     );
     const message = await client.messages.create({
-      from: "whatsapp:+15558787859", // ✅ Twilio WhatsApp sender (sandbox or approved number)
+      from: process.env.TWILIO_CONTENT_SID, // ✅ Twilio WhatsApp sender (sandbox or approved number)
       to: `whatsapp:+91${customerPhoneReceiver}`, // ✅ Dynamic number (must include +91)
-      contentSid: "HXd130efba4d28a551ff9d70ad97c5411b", // ✅ Your approved template SID
+      contentSid: process.env.TWILIO_CONTENT_SID, // ✅ Your approved template SID
       contentVariables: JSON.stringify(body), // ✅ Must be a JSON string
     });
 

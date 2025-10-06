@@ -1,6 +1,7 @@
 const express = require("express");
 const mongoose = require("mongoose");
 const dotenv = require("dotenv");
+dotenv.config();
 const bodyParser = require("body-parser");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
@@ -18,7 +19,6 @@ const salaryRoutes = require("./routes/salaryRoutes");
 const ecommerceRoutes = require("./routes/ecommerceRoutes");
 const categoryRoutes = require("./routes/categoryRoutes");
 
-dotenv.config();
 
 const app = express();
 
