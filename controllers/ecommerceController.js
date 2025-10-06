@@ -1,4 +1,5 @@
 const Product = require("../models/Product");
+const Category = require("../models/Category");
 
 // Public API - Get products with advanced search and filtering
 const getProducts = async (req, res) => {
@@ -26,9 +27,14 @@ const getProducts = async (req, res) => {
       filter.$text = { $search: search };
     }
 
-    // Category filter
-    if (category) {
-      filter.category = category;
+    // Category filter (supports comma-separated category ids) and alias categoryId/categoryIds
+    const categoryParam = category || req.query.categoryId || req.query.categoryIds;
+    if (categoryParam) {
+      const categoryIds = String(categoryParam)
+        .split(",")
+        .map((id) => id.trim())
+        .filter(Boolean);
+      filter.categories = { $in: categoryIds };
     }
 
     // Brand filter
@@ -188,7 +194,14 @@ const getProductFilters = async (req, res) => {
       deletedAt: null,
     };
 
-    if (category) filter.category = category;
+    const categoryParam = category || req.query.categoryId || req.query.categoryIds;
+    if (categoryParam) {
+      const categoryIds = String(categoryParam)
+        .split(",")
+        .map((id) => id.trim())
+        .filter(Boolean);
+      filter.categories = { $in: categoryIds };
+    }
     if (brand) filter.brand = brand;
 
     // Get price range
@@ -206,13 +219,19 @@ const getProductFilters = async (req, res) => {
     // Get available brands
     const brands = await Product.distinct("brand", filter);
 
-    // Get available categories
-    const categories = await Product.distinct("category", filter);
+    // Get available categories (as objects) based on products
+    const categoryIds = await Product.distinct("categories", filter);
+    const categories = await Category.find({
+      _id: { $in: categoryIds.filter(Boolean) },
+      deletedAt: null,
+    })
+      .select("_id name slug hasImage")
+      .lean();
 
     const filters = {
       priceRange: priceStats[0] || { minPrice: 0, maxPrice: 0 },
       brands: brands.filter(Boolean),
-      categories: categories.filter(Boolean),
+      categories,
     };
 
     res.json({
@@ -232,5 +251,45 @@ const getProductFilters = async (req, res) => {
 module.exports = {
   getProducts,
   getProductById,
-  getProductFilters
+  getProductFilters,
+  // Public API - Get all categories for e-commerce (with cache and cache headers)
+  async getCategories(req, res) {
+    try {
+      // Simple in-memory cache for 5 minutes
+      if (!global.__ecommCache) {
+        global.__ecommCache = Object.create(null);
+      }
+      const cacheKey = "categories_all_v1";
+      const cached = global.__ecommCache[cacheKey];
+      const now = Date.now();
+      const ttlMs = 5 * 60 * 1000; // 5 minutes
+      if (cached && (now - cached.ts) < ttlMs) {
+        res.set("Cache-Control", "public, max-age=60, s-maxage=60");
+        return res.json({ success: true, data: cached.value });
+      }
+
+      const categories = await Category.find({ deletedAt: null })
+        .select("_id name secondaryName slug hasImage")
+        .sort({ name: 1 })
+        .lean();
+
+      // Save to cache
+      global.__ecommCache[cacheKey] = { ts: now, value: categories };
+
+      // Short CDN/browser cache to smooth bursts without risking staleness
+      res.set("Cache-Control", "public, max-age=60, s-maxage=60");
+
+      res.json({
+        success: true,
+        data: categories,
+      });
+    } catch (error) {
+      console.error("Error fetching categories:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to fetch categories",
+        message: error.message,
+      });
+    }
+  }
 };
