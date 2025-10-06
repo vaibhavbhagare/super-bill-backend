@@ -1,42 +1,44 @@
 const twilio = require("twilio");
-const accountSid = "AC579d13b5f9faef79cf3d789d24d5fca9";
-const authToken = "513dbba59279e3fa417048065af4c981";
+const accountSid = "ACa2ad0f31d5591b9d31b8cd89adcee15c";
+const authToken = "cef767502681697a32a854062265b7b6";
 const client = new twilio(accountSid, authToken);
 const axios = require("axios");
 
-exports.sendWhatsAppMessage = async (
-  customerName,
-  amount,
-  phoneNumber,
-  imageUrl,
-) => {
+exports.sendWhatsAppMessageTwilio = async (invoice, customer) => {
   try {
-    const messageBody = `नमस्कार ${customerName},
-*भगरे सुपर मार्केट* कडून आपल्याकडून झालेल्या पेमेंटची माहिती खालीलप्रमाणे आहे:
-चलन रक्कम: ₹${amount}
-आमच्याशी व्यवहार केल्याबद्दल धन्यवाद!
-*भगरे सुपर मार्केट*
-9764384901/9960038085
+    const storeInfo = {
+      name: "भगरे सुपर मार्केट",
+      address1: `अंकोली & `,
+      address2: `अंकोली-शेजबाभूळगाव चौक`,
+      phoneNumber: "9764384901, 9960038085",
+    };
+    console.log(customer);
+    const customerPhoneReceiver = normalizePhoneNumber(customer.phoneNumber);
 
-विश्वासाचे मार्केट – सर्व काही, एकाच ठिकाणी आणि जास्त बचत!`;
+    if (!customerPhoneReceiver) {
+      return;
+    }
 
+    const body = generateMarathiInvoiceParamsTwilio(
+      invoice,
+      customer,
+      storeInfo
+    );
     const message = await client.messages.create({
-      from: "whatsapp:+14155238886", // Twilio sandbox or your approved number
-      to: "whatsapp:+918308877559",
-      body: messageBody,
-      mediaUrl: [imageUrl], // this should be a public image URL
+      from: "whatsapp:+15558787859", // ✅ Twilio WhatsApp sender (sandbox or approved number)
+      to: `whatsapp:+91${customerPhoneReceiver}`, // ✅ Dynamic number (must include +91)
+      contentSid: "HXd130efba4d28a551ff9d70ad97c5411b", // ✅ Your approved template SID
+      contentVariables: JSON.stringify(body), // ✅ Must be a JSON string
     });
 
-    console.log("WhatsApp message sent:", JSON.stringify(message));
+    console.log("✅ WhatsApp message sent:", message);
   } catch (error) {
-    console.error("Error sending WhatsApp message:", error);
+    console.error("❌ Error sending WhatsApp message:", error.message);
   }
 };
 
 exports.sendTextMessage = async (invoice, customer) => {
   try {
-    console.log(generateMarathiInvoiceParams(invoice, customer));
-
     const response = await axios({
       url: "https://graph.facebook.com/v22.0/708120182383703/messages",
       method: "post",
@@ -73,45 +75,6 @@ exports.sendTextMessage = async (invoice, customer) => {
   }
 };
 
-function generateMarathiInvoiceMessage(invoice, customer) {
-  const date = new Date(invoice.createdAt).toLocaleDateString("hi-IN");
-  const billNo =
-    invoice.invoiceNumber || invoice._id.toString().slice(-6).toUpperCase();
-  const customerName = customer.fullName || "ग्राहक";
-
-  // Generate product lines
-  const productLines = invoice.buyingProducts
-    .map((item, index) => {
-      const qtyUnit = item.quantity + (item.unit || " नग");
-      const line = `${index + 1}️ ${item.name} (${qtyUnit}) - ₹${item.price}`;
-      return line;
-    })
-    .join("\n");
-
-  const { subtotal, discount, total } = invoice.billingSummary || {};
-  const paymentMethod =
-    {
-      ONLINE: "GPay / PhonePe / कार्ड",
-      CASH: "रोख",
-      CREDIT: "उधार",
-    }[invoice.transactionType] || "निवडलेले नाही";
-
-  return ` भगरे सुपर मार्केट 
-━━━━━━━━━━━━━━━
-दिनांक: ${date}
-बिल क्रमांक: ${billNo}
-ग्राहक: ${customerName}
-
-खरेदीची माहिती:
-${productLines}
-
-━━━━━━━━━━━━━━━
-एकूण रक्कम: ₹${subtotal || 0}
-सवलत: ₹${discount || 0}
-देय रक्कम: ₹${total || 0}
-
-पेमेंट प्रकार: ${paymentMethod}`;
-}
 function sanitizeText(text) {
   return text
     .replace(/\n/g, " ") // remove new lines
@@ -158,4 +121,65 @@ function generateMarathiInvoiceParams(invoice, customer) {
     { type: "text", text: paymentMethod }, // {{8}} पेमेंट प्रकार
     { type: "text", text: customerName }, // {{8}} पेमेंट प्रकार
   ];
+}
+
+function generateMarathiInvoiceParamsTwilio(invoice, customer, storeInfo) {
+  const date = new Date(invoice.createdAt).toLocaleDateString("hi-IN");
+  const billNo =
+    invoice.invoiceNumber || invoice._id?.toString().slice(-6).toUpperCase();
+  const customerName = customer?.fullName || "ग्राहक";
+  const productLines = invoice.buyingProducts
+    .map((item) => {
+      const qtyUnit = item.quantity + (item.unit || " नग");
+      return `${item.secondName || item.name} (${qtyUnit}) - ₹${item.price}`;
+    })
+    .join(invoice.buyingProducts.length > 1 ? ", " : "");
+
+  const {
+    subtotal = 0,
+    discount = 0,
+    total = 0,
+  } = invoice.billingSummary || {};
+
+  const paymentMethod =
+    {
+      ONLINE: "GPay / PhonePe / कार्ड",
+      CASH: "रोख",
+      CREDIT: "उधार",
+    }[invoice.transactionType] || "निवडलेले नाही";
+
+  const storeName = storeInfo?.name || "भगरे सुपर मार्केट";
+  const address1 = storeInfo?.address1 || "Ankoli";
+  const address2 = storeInfo?.address2 || "";
+  const phone = storeInfo?.phoneNumber || "9960038085";
+
+  return {
+    1: storeName, // दुकानाचे नाव
+    2: customerName, // ग्राहकाचे नाव
+    3: date, // दिनांक
+    4: billNo, // बिल क्रमांक
+    5: customerName, // खरेदी माहिती
+    6: sanitizeText(productLines), // एकूण रक्कम
+    7: `₹${total}`, // सवलत
+    8: `₹${discount}`, // देय रक्कम
+    9: `₹${subtotal}`, // देय रक्कम
+    10: paymentMethod, // पेमेंट प्रकार
+    11: address1, // पत्ता
+    12: address2, // मोबाईल क्रमांक
+    13: phone, // मोबाईल क्रमांक
+  };
+}
+
+function normalizePhoneNumber(input) {
+  if (input == null) return null;
+
+  // Convert number to string safely
+  let digits = String(input).replace(/\D/g, "");
+
+  // Remove leading + if present
+  if (digits.startsWith("91")) digits = digits.slice(2);
+  else if (digits.startsWith("0")) digits = digits.slice(1);
+
+  // Must be exactly 10 digits now
+  return digits.length === 10 ? digits : null;
 }

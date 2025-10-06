@@ -115,8 +115,14 @@ exports.createInvoice = async (req, res) => {
                 totalUnitsSold: Number(item.quantity || 0),
                 totalTimesSold: 1,
                 ...(channel === "POS"
-                  ? { posUnitsSold: Number(item.quantity || 0), posTimesSold: 1 }
-                  : { onlineUnitsSold: Number(item.quantity || 0), onlineTimesSold: 1 }),
+                  ? {
+                      posUnitsSold: Number(item.quantity || 0),
+                      posTimesSold: 1,
+                    }
+                  : {
+                      onlineUnitsSold: Number(item.quantity || 0),
+                      onlineTimesSold: 1,
+                    }),
               },
               $set: { lastSoldAt: nowTs, lastInvoice: invoice._id },
             },
@@ -131,8 +137,10 @@ exports.createInvoice = async (req, res) => {
       if (!customerData) {
         return res.status(404).json({ error: "Customer not found" });
       }
-      whatsappService.sendTextMessage(invoice, customerData);
-
+      // whatsappService.sendTextMessage(invoice, customerData);
+      if (sendWhatsappMessage || customerData.phoneNumber !== 9764384901) {
+        whatsappService.sendWhatsAppMessageTwilio(invoice, customerData);
+      }
       res.status(201).json(invoice);
     } catch (err) {
       if (
