@@ -297,3 +297,29 @@ exports.getInvoices = async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 };
+
+// Send WhatsApp by invoice number
+exports.sendWhatsAppByInvoiceNumber = async (req, res) => {
+  try {
+    const { invoiceNumber } = req.body || {};
+    if (!invoiceNumber) {
+      return res.status(400).json({ error: "invoiceNumber is required" });
+    }
+
+    const invoice = await Invoice.findOne({ invoiceNumber });
+    if (!invoice) {
+      return res.status(404).json({ error: "Invoice not found" });
+    }
+
+    const customer = await Customer.findById(invoice.customer);
+    if (!customer) {
+      return res.status(404).json({ error: "Customer not found for invoice" });
+    }
+
+    await whatsappService.sendWhatsAppMessageTwilio(invoice, customer);
+    return res.status(200).json({ message: "WhatsApp message sent (or queued)" });
+  } catch (err) {
+    console.error("Error sending WhatsApp by invoiceNumber:", err.message);
+    return res.status(500).json({ error: err.message });
+  }
+};
