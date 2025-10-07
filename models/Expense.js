@@ -2,11 +2,6 @@ const mongoose = require("mongoose");
 
 const expenseSchema = new mongoose.Schema(
   {
-    title: { 
-      type: String, 
-      required: true,
-      trim: true 
-    },
     description: { 
       type: String, 
       trim: true 
@@ -18,36 +13,33 @@ const expenseSchema = new mongoose.Schema(
     },
     category: { 
       type: String, 
-      required: true,
-      enum: [
-        "office_supplies",
-        "utilities", 
-        "rent",
-        "transportation",
-        "marketing",
-        "equipment",
-        "maintenance",
-        "food",
-        "travel",
-        "other"
-      ]
+      required: false
     },
     paymentMethod: {
       type: String,
       required: true,
-      enum: ["cash", "card", "bank_transfer", "cheque", "upi"]
+      enum: ["cash", "card", "bank", "cheque", "upi"]
     },
     receiptNumber: { 
       type: String, 
       trim: true 
+    },
+    // New fields
+    referenceNo: {
+      type: String,
+      trim: true
     },
     receiptImage: { 
       type: String 
     },
     expenseDate: { 
       type: Date, 
-      required: true,
+      required: false,
       default: Date.now 
+    },
+    // New canonical date field per user request
+    date: {
+      type: Date,
     },
     status: {
       type: String,
@@ -69,7 +61,26 @@ const expenseSchema = new mongoose.Schema(
     },
     createdBy: { 
       type: String, 
-      required: true 
+      required: false 
+    },
+    person: {
+      type: String,
+      trim: true,
+    },
+    type: {
+      type: String,
+      trim: true,
+      enum: [
+        "purchase",
+        "rent",
+        "salary",
+        "expense",
+        "owner_withdraw",
+        "owner_deposit",
+        "hand_cash",
+        "saving_pigmi",
+        "bank_emi"
+      ]
     },
     updatedBy: { 
       type: String 

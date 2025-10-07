@@ -4,8 +4,19 @@ const Expense = require("../models/Expense");
 exports.createExpense = async (req, res) => {
   try {
     const expenseData = {
-      ...req.body,
-      createdBy: req.user.userName,
+      // Map incoming fields to model
+      description: req.body.description,
+      amount: Number(req.body.amount),
+      paymentMethod: req.body.paymentMethod,
+      receiptNumber: req.body.receiptNumber,
+      referenceNo: req.body.referenceNo,
+      expenseDate: req.body.expenseDate ? new Date(req.body.expenseDate) : undefined,
+      date: req.body.date ? new Date(req.body.date) : undefined,
+      status: req.body.status,
+      person: req.body.person,
+      type: req.body.type,
+      createdBy: req.user?.userName,
+      updatedBy: req.user?.userName,
     };
 
     const expense = new Expense(expenseData);
