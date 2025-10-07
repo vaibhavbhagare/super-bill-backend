@@ -27,8 +27,9 @@ exports.sendWhatsAppMessageTwilio = async (invoice, customer) => {
       customer,
       storeInfo
     );
+    const sender = process.env.TWILIO_WHATSAPP_FROM;
     const message = await client.messages.create({
-      from: process.env.TWILIO_WHATSAPP_FROM, // ✅ Twilio WhatsApp sender (sandbox or approved number)
+      from: sender, // ✅ Twilio WhatsApp sender (sandbox or approved number)
       to: `whatsapp:+91${customerPhoneReceiver}`, // ✅ Dynamic number (must include +91)
       contentSid: process.env.TWILIO_CONTENT_SID, // ✅ Your approved template SID
       contentVariables: JSON.stringify(body), // ✅ Must be a JSON string
