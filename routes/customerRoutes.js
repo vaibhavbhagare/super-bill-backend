@@ -17,4 +17,22 @@ router.get("/:id", customerController.getCustomerById);
 router.put("/:id", customerController.updateCustomer);
 router.delete("/:id", customerController.deleteCustomer);
 
+// Customer address routes
+router.post(
+  "/:id/addresses",
+  customerController.addCustomerAddress
+);
+router.put(
+  "/:id/addresses/:addressId",
+  customerController.updateCustomerAddress
+);
+router.delete(
+  "/:id/addresses/:addressId",
+  customerController.deleteCustomerAddress
+);
+router.post(
+  "/:id/addresses/:addressId/default",
+  customerController.setDefaultCustomerAddress
+);
+
 module.exports = router;

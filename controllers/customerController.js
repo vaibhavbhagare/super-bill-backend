@@ -133,6 +133,134 @@ exports.deleteCustomer = async (req, res) => {
   }
 };
 
+// ---------------------- ADDRESS MANAGEMENT (AUTH) ----------------------
+// Add new address
+exports.addCustomerAddress = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, addressLine1, addressLine2, city, pincode, isDefault } =
+      req.body || {};
+
+    if (!addressLine1 || !city || !pincode) {
+      return res.status(400).json({
+        error: "addressLine1, city and pincode are required",
+      });
+    }
+
+    const customer = await Customer.findById(id);
+    if (!customer) return res.status(404).json({ error: "Customer not found" });
+
+    const newAddress = {
+      name: name || "home",
+      addressLine1,
+      addressLine2: addressLine2 || null,
+      city,
+      pincode,
+      isDefault: Boolean(isDefault),
+    };
+
+    // If this is the first address, force default = true
+    if (!customer.addresses || customer.addresses.length === 0) {
+      newAddress.isDefault = true;
+      customer.addresses = [];
+    }
+
+    // If isDefault was requested, clear others
+    if (newAddress.isDefault) {
+      customer.addresses.forEach((a) => (a.isDefault = false));
+    }
+
+    customer.addresses.push(newAddress);
+    await customer.save();
+
+    return res.status(201).json({ addresses: customer.addresses });
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+};
+
+// Update address
+exports.updateCustomerAddress = async (req, res) => {
+  try {
+    const { id, addressId } = req.params;
+    const { name, addressLine1, addressLine2, city, pincode, isDefault } =
+      req.body || {};
+
+    const customer = await Customer.findById(id);
+    if (!customer) return res.status(404).json({ error: "Customer not found" });
+
+    const address = customer.addresses.id(addressId);
+    if (!address) return res.status(404).json({ error: "Address not found" });
+
+    if (addressLine1 !== undefined) address.addressLine1 = addressLine1;
+    if (addressLine2 !== undefined) address.addressLine2 = addressLine2;
+    if (city !== undefined) address.city = city;
+    if (pincode !== undefined) address.pincode = pincode;
+    if (name !== undefined) address.name = name;
+
+    if (isDefault === true) {
+      customer.addresses.forEach((a) => (a.isDefault = false));
+      address.isDefault = true;
+    } else if (isDefault === false) {
+      address.isDefault = false;
+    }
+
+    // If only one address remains, ensure default
+    if (customer.addresses.length === 1) {
+      customer.addresses[0].isDefault = true;
+    }
+
+    await customer.save();
+    return res.json({ addresses: customer.addresses });
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+};
+
+// Delete address
+exports.deleteCustomerAddress = async (req, res) => {
+  try {
+    const { id, addressId } = req.params;
+    const customer = await Customer.findById(id);
+    if (!customer) return res.status(404).json({ error: "Customer not found" });
+
+    const address = customer.addresses.id(addressId);
+    if (!address) return res.status(404).json({ error: "Address not found" });
+
+    address.deleteOne();
+
+    // After removal, if only one address remains, force it to default
+    if (customer.addresses.length === 1) {
+      customer.addresses[0].isDefault = true;
+    }
+
+    await customer.save();
+    return res.json({ addresses: customer.addresses });
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+};
+
+// Set default address
+exports.setDefaultCustomerAddress = async (req, res) => {
+  try {
+    const { id, addressId } = req.params;
+    const customer = await Customer.findById(id);
+    if (!customer) return res.status(404).json({ error: "Customer not found" });
+
+    const address = customer.addresses.id(addressId);
+    if (!address) return res.status(404).json({ error: "Address not found" });
+
+    customer.addresses.forEach((a) => (a.isDefault = false));
+    address.isDefault = true;
+
+    await customer.save();
+    return res.json({ addresses: customer.addresses });
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+};
+
 // ---------------------- OTP LOGIN (PUBLIC) ----------------------
 const generateOtp = () =>
   Math.floor(100000 + Math.random() * 900000).toString();

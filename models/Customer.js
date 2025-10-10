@@ -5,9 +5,23 @@ const customerSchema = new mongoose.Schema(
     phoneNumber: { type: Number, required: true, unique: true },
     fullName: { type: String, required: true },
     address: { type: String, default: null },
-    addressLine2: { type: String, default: null },
-    city: { type: String, default: null },
-    pincode: { type: String, default: null },
+    // New addresses array to support multiple addresses
+    addresses: {
+      type: [
+        new mongoose.Schema(
+          {
+            name: { type: String, default: "Home" },
+            addressLine1: { type: String, required: true },
+            addressLine2: { type: String, default: null },
+            city: { type: String, required: true },
+            pincode: { type: String, required: true },
+            isDefault: { type: Boolean, default: false },
+          },
+          { _id: true, timestamps: true }
+        ),
+      ],
+      default: [],
+    },
     notepadPage: { type: String, default: null },
     isSynced: { type: Boolean },
     createdBy: String,
