@@ -1,4 +1,11 @@
 const Customer = require("../models/Customer");
+const CustomerOtp = require("../models/CustomerOtp");
+const jwt = require("jsonwebtoken");
+const twilio = require("twilio");
+const smsClient = new twilio(
+  process.env.TWILIO_ACCOUNT_SID,
+  process.env.TWILIO_AUTH_TOKEN,
+);
 
 const whatsappService = require("../controllers/whatsappService");
 // Create
@@ -123,5 +130,120 @@ exports.deleteCustomer = async (req, res) => {
     res.json({ message: "Customer deleted" });
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+};
+
+// ---------------------- OTP LOGIN (PUBLIC) ----------------------
+const generateOtp = () => Math.floor(100000 + Math.random() * 900000).toString();
+const normalizePhone = (input) => {
+  let digits = String(input || "").replace(/\D/g, "");
+  if (digits.startsWith("91")) digits = digits.slice(2);
+  if (digits.startsWith("0")) digits = digits.slice(1);
+  return digits.length === 10 ? digits : null;
+};
+const signCustomerToken = (customer) => {
+  return jwt.sign(
+    {
+      customerId: customer._id,
+      phoneNumber: customer.phoneNumber,
+      type: "customer",
+    },
+    process.env.JWT_SECRET || "bhagare_super_market",
+    { expiresIn: process.env.CUSTOMER_JWT_EXPIRES_IN || "15h" },
+  );
+};
+
+exports.sendLoginOtp = async (req, res) => {
+  try {
+    const { phoneNumber } = req.body || {};
+    const normalized = normalizePhone(phoneNumber);
+    if (!normalized) {
+      return res.status(400).json({ success: false, error: "Valid 10-digit phoneNumber required" });
+    }
+
+    const otp = generateOtp();
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+    await CustomerOtp.create({ phoneNumber: Number(normalized), otp, expiresAt });
+
+    // Prefer WhatsApp via Twilio
+    const waFrom = process.env.TWILIO_WHATSAPP_FROM; // e.g., whatsapp:+1415xxxxxxx
+    const waTo = `whatsapp:+91${normalized}`;
+    if (waFrom) {
+      const contentSid = process.env.TWILIO_OTP_CONTENT_SID; // optional template SID
+      if (contentSid) {
+        await smsClient.messages.create({
+          from: waFrom,
+          to: waTo,
+          contentSid,
+          contentVariables: JSON.stringify({ 1: otp, 2: "5" }),
+        });
+      } else {
+        await smsClient.messages.create({
+          from: waFrom,
+          to: waTo,
+          body: `Your login OTP is ${otp}. It expires in 5 minutes.`,
+        });
+      }
+    }
+    return res.json({ success: true, message: "OTP sent" });
+  } catch (err) {
+    console.error("sendLoginOtp error:", err);
+    return res.status(500).json({ success: false, error: "Failed to send OTP" });
+  }
+};
+
+exports.verifyLoginOtp = async (req, res) => {
+  try {
+    const { phoneNumber, otp, fullName, address, addressLine2, city, pincode } = req.body || {};
+    const normalized = normalizePhone(phoneNumber);
+    if (!normalized || !otp) {
+      return res.status(400).json({ success: false, error: "phoneNumber and otp required" });
+    }
+
+    const record = await CustomerOtp.findOne({ phoneNumber: Number(normalized) })
+      .sort({ createdAt: -1 });
+    if (!record || record.expiresAt < new Date()) {
+      return res.status(400).json({ success: false, error: "OTP expired or not found" });
+    }
+    if (record.verifiedAt) {
+      return res.status(400).json({ success: false, error: "OTP already used" });
+    }
+    if (record.attempts >= 5) {
+      return res.status(429).json({ success: false, error: "Too many attempts" });
+    }
+    if (record.otp !== String(otp)) {
+      record.attempts += 1;
+      await record.save();
+      return res.status(400).json({ success: false, error: "Invalid OTP" });
+    }
+
+    record.verifiedAt = new Date();
+    await record.save();
+
+    // Upsert customer
+    let customer = await Customer.findOne({ phoneNumber: Number(normalized) });
+    if (!customer) {
+      customer = await Customer.create({
+        phoneNumber: Number(normalized),
+        fullName: fullName || "Guest",
+        address: address || null,
+        addressLine2: addressLine2 || null,
+        city: city || null,
+        pincode: pincode || null,
+      });
+    } else if (fullName || address || addressLine2 || city || pincode) {
+      customer.fullName = fullName || customer.fullName;
+      customer.address = address || customer.address;
+      customer.addressLine2 = addressLine2 || customer.addressLine2;
+      customer.city = city || customer.city;
+      customer.pincode = pincode || customer.pincode;
+      await customer.save();
+    }
+
+    const token = signCustomerToken(customer);
+    return res.json({ success: true, token, customer: { id: customer._id, fullName: customer.fullName, phoneNumber: customer.phoneNumber, address: customer.address, addressLine2: customer.addressLine2, city: customer.city, pincode: customer.pincode } });
+  } catch (err) {
+    console.error("verifyLoginOtp error:", err);
+    return res.status(500).json({ success: false, error: "Failed to verify OTP" });
   }
 };

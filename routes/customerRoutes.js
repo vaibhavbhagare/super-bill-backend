@@ -3,7 +3,11 @@ const router = express.Router();
 const customerController = require("../controllers/customerController");
 const { auth } = require("../middleware/auth");
 
-// Apply auth middleware to all routes
+// Public OTP login endpoints (no auth)
+router.post("/otp/send", customerController.sendLoginOtp);
+router.post("/otp/verify", customerController.verifyLoginOtp);
+
+// Apply auth middleware to all remaining customer routes
 router.use(auth);
 
 // Customer routes
