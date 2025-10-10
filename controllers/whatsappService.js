@@ -10,12 +10,11 @@ const axios = require("axios");
 exports.sendWhatsAppMessageTwilio = async (invoice, customer) => {
   try {
     const storeInfo = {
-      name: "भगरे सुपर मार्केट",
+      name: "*भगरे सुपर मार्केट*",
       address1: `अंकोली & `,
       address2: `अंकोली-शेजबाभूळगाव चौक`,
-      phoneNumber: "9764384901, 9960038085",
+      phoneNumber: "9764384901",
     };
-    console.log(customer);
     const customerPhoneReceiver = normalizePhoneNumber(customer.phoneNumber);
 
     if (!customerPhoneReceiver) {
@@ -87,12 +86,18 @@ function sanitizeText(text) {
     .trim();
 }
 
+function truncateText(text, maxLength) {
+  const value = String(text || "").trim();
+  if (!maxLength || maxLength <= 0) return value;
+  return value.length <= maxLength ? value : value.slice(0, maxLength);
+}
+
 function generateMarathiInvoiceParams(invoice, customer) {
   const date = new Date(invoice.createdAt).toLocaleDateString("hi-IN");
   const billNo =
     invoice.invoiceNumber || invoice._id.toString().slice(-6).toUpperCase();
   const customerName = customer.fullName || "ग्राहक";
-  const productLength = invoice.buyingProducts.length;
+  // const productLength = invoice.buyingProducts.length;
 
   const productLines = invoice.buyingProducts
     .map((item) => {
@@ -132,12 +137,18 @@ function generateMarathiInvoiceParamsTwilio(invoice, customer, storeInfo) {
   const billNo =
     invoice.invoiceNumber || invoice._id?.toString().slice(-6).toUpperCase();
   const customerName = customer?.fullName || "ग्राहक";
-  const productLines = invoice.buyingProducts
-    .map((item) => {
-      const qtyUnit = item.quantity + (item.unit || " नग");
-      return `${item.secondName || item.name} (${qtyUnit}) - ₹${item.price}`;
-    })
-    .join(invoice.buyingProducts.length > 1 ? ", " : "");
+  // const productLines = invoice.buyingProducts
+  //   .map((item) => {
+  //     const qtyUnit = item.quantity;
+  //     const rawName = item.secondName || item.name;
+  //     const shortName = truncateText(rawName, 8); // compress name to max 8 chars
+  //     return `${shortName} (${qtyUnit}) - ₹${item.price}`;
+  //   })
+  //   .join(invoice.buyingProducts.length > 1 ? ", " : "");
+  const productLines = `आपण *एकूण ${invoice?.buyingProducts?.length || 0} वस्तू* खरेदी केल्या आहेत.
+----------------------------------------
+📸 आमच्या नवीन ऑफर्स आणि अपडेट्स पाहण्यासाठी फॉलो करा:
+https://www.instagram.com/bhagaresupermarket`;
 
   const {
     subtotal = 0,
