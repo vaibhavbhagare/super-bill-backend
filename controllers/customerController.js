@@ -4,7 +4,7 @@ const jwt = require("jsonwebtoken");
 const twilio = require("twilio");
 const smsClient = new twilio(
   process.env.TWILIO_ACCOUNT_SID,
-  process.env.TWILIO_AUTH_TOKEN,
+  process.env.TWILIO_AUTH_TOKEN
 );
 
 const whatsappService = require("../controllers/whatsappService");
@@ -124,7 +124,7 @@ exports.deleteCustomer = async (req, res) => {
   try {
     const deleted = await Customer.softDelete(
       req.params.id,
-      req.user?.userName || "system",
+      req.user?.userName || "system"
     );
     if (!deleted) return res.status(404).json({ error: "Customer not found" });
     res.json({ message: "Customer deleted" });
@@ -134,7 +134,8 @@ exports.deleteCustomer = async (req, res) => {
 };
 
 // ---------------------- OTP LOGIN (PUBLIC) ----------------------
-const generateOtp = () => Math.floor(100000 + Math.random() * 900000).toString();
+const generateOtp = () =>
+  Math.floor(100000 + Math.random() * 900000).toString();
 const normalizePhone = (input) => {
   let digits = String(input || "").replace(/\D/g, "");
   if (digits.startsWith("91")) digits = digits.slice(2);
@@ -149,7 +150,7 @@ const signCustomerToken = (customer) => {
       type: "customer",
     },
     process.env.JWT_SECRET || "bhagare_super_market",
-    { expiresIn: process.env.CUSTOMER_JWT_EXPIRES_IN || "15h" },
+    { expiresIn: process.env.CUSTOMER_JWT_EXPIRES_IN || "15h" }
   );
 };
 
@@ -158,12 +159,18 @@ exports.sendLoginOtp = async (req, res) => {
     const { phoneNumber } = req.body || {};
     const normalized = normalizePhone(phoneNumber);
     if (!normalized) {
-      return res.status(400).json({ success: false, error: "Valid 10-digit phoneNumber required" });
+      return res
+        .status(400)
+        .json({ success: false, error: "Valid 10-digit phoneNumber required" });
     }
 
     const otp = generateOtp();
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
-    await CustomerOtp.create({ phoneNumber: Number(normalized), otp, expiresAt });
+    await CustomerOtp.create({
+      phoneNumber: Number(normalized),
+      otp,
+      expiresAt,
+    });
 
     // Prefer WhatsApp via Twilio
     const waFrom = process.env.TWILIO_WHATSAPP_FROM; // e.g., whatsapp:+1415xxxxxxx
@@ -188,28 +195,40 @@ exports.sendLoginOtp = async (req, res) => {
     return res.json({ success: true, message: "OTP sent" });
   } catch (err) {
     console.error("sendLoginOtp error:", err);
-    return res.status(500).json({ success: false, error: "Failed to send OTP" });
+    return res
+      .status(500)
+      .json({ success: false, error: "Failed to send OTP" });
   }
 };
 
 exports.verifyLoginOtp = async (req, res) => {
   try {
-    const { phoneNumber, otp, fullName, address, addressLine2, city, pincode } = req.body || {};
+    const { phoneNumber, otp, fullName, address, addressLine2, city, pincode } =
+      req.body || {};
     const normalized = normalizePhone(phoneNumber);
     if (!normalized || !otp) {
-      return res.status(400).json({ success: false, error: "phoneNumber and otp required" });
+      return res
+        .status(400)
+        .json({ success: false, error: "phoneNumber and otp required" });
     }
 
-    const record = await CustomerOtp.findOne({ phoneNumber: Number(normalized) })
-      .sort({ createdAt: -1 });
+    const record = await CustomerOtp.findOne({
+      phoneNumber: Number(normalized),
+    }).sort({ createdAt: -1 });
     if (!record || record.expiresAt < new Date()) {
-      return res.status(400).json({ success: false, error: "OTP expired or not found" });
+      return res
+        .status(400)
+        .json({ success: false, error: "OTP expired or not found" });
     }
     if (record.verifiedAt) {
-      return res.status(400).json({ success: false, error: "OTP already used" });
+      return res
+        .status(400)
+        .json({ success: false, error: "OTP already used" });
     }
     if (record.attempts >= 5) {
-      return res.status(429).json({ success: false, error: "Too many attempts" });
+      return res
+        .status(429)
+        .json({ success: false, error: "Too many attempts" });
     }
     if (record.otp !== String(otp)) {
       record.attempts += 1;
@@ -241,9 +260,23 @@ exports.verifyLoginOtp = async (req, res) => {
     }
 
     const token = signCustomerToken(customer);
-    return res.json({ success: true, token, customer: { id: customer._id, fullName: customer.fullName, phoneNumber: customer.phoneNumber, address: customer.address, addressLine2: customer.addressLine2, city: customer.city, pincode: customer.pincode } });
+    return res.json({
+      success: true,
+      token,
+      customer: {
+        id: customer._id,
+        fullName: customer.fullName,
+        phoneNumber: customer.phoneNumber,
+        address: customer.address,
+        addressLine2: customer.addressLine2,
+        city: customer.city,
+        pincode: customer.pincode,
+      },
+    });
   } catch (err) {
     console.error("verifyLoginOtp error:", err);
-    return res.status(500).json({ success: false, error: "Failed to verify OTP" });
+    return res
+      .status(500)
+      .json({ success: false, error: "Failed to verify OTP" });
   }
 };
