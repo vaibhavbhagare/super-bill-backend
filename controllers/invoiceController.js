@@ -146,7 +146,7 @@ exports.createInvoice = async (req, res) => {
         return res.status(404).json({ error: "Customer not found" });
       }
       // whatsappService.sendTextMessage(invoice, customerData);
-      if (sendWhatsappMessage || customerData.phoneNumber !== 9764384901) {
+      if (sendWhatsappMessage && customerData.phoneNumber !== 9764384901) {
         whatsappService.sendWhatsAppMessageTwilio(invoice, customerData);
       }
       res.status(201).json(invoice);
