@@ -4,6 +4,7 @@ const customerSchema = new mongoose.Schema(
   {
     phoneNumber: { type: Number, required: true, unique: true },
     fullName: { type: String, required: true },
+    email: { type: String, default: null },
     address: { type: String, default: null },
     // New addresses array to support multiple addresses
     addresses: {
