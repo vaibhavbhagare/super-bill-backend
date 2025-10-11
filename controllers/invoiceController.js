@@ -147,7 +147,7 @@ exports.createInvoice = async (req, res) => {
       }
       // whatsappService.sendTextMessage(invoice, customerData);
       if (sendWhatsappMessage || customerData.phoneNumber !== 9764384901) {
-        whatsappService.sendWhatsAppMessageTwilio(invoice, customerData);
+        whatsappService.sendWhatsAppMessageTwilioShortInvoice(invoice, customerData);
       }
       res.status(201).json(invoice);
     } catch (err) {
@@ -316,7 +316,7 @@ exports.sendWhatsAppByInvoiceNumber = async (req, res) => {
       return res.status(404).json({ error: "Customer not found for invoice" });
     }
 
-    await whatsappService.sendWhatsAppMessageTwilio(invoice, customer);
+    await whatsappService.sendWhatsAppMessageTwilioShortInvoice(invoice, customer);
     return res.status(200).json({ message: "WhatsApp message sent (or queued)" });
   } catch (err) {
     console.error("Error sending WhatsApp by invoiceNumber:", err.message);
