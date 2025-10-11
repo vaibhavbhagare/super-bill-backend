@@ -1,6 +1,7 @@
 const Invoice = require("../models/Invoice");
 const Product = require("../models/Product");
 const ProductStats = require("../models/ProductStats");
+const Expense = require("../models/Expense");
 const mongoose = require("mongoose");
 
 exports.getReport = async (req, res) => {
@@ -151,11 +152,41 @@ exports.getReport = async (req, res) => {
       },
     ];
 
-    const [result] = await Invoice.aggregate(pipeline).allowDiskUse(true);
+    // Execute invoice aggregation
+    const [invoiceResult] = await Invoice.aggregate(pipeline).allowDiskUse(true);
+
+    // Build expense filter with same date range and filters
+    const expenseMatch = {
+      $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
+      expenseDate: { $gte: start, $lte: end },
+    };
+
+    // Add billerId filter for expenses if provided (assuming expenses have createdBy field)
+    if (billerId) {
+      expenseMatch.createdBy = billerId;
+    }
+
+    // Execute expense aggregation
+    const expensePipeline = [
+      { $match: expenseMatch },
+      {
+        $group: {
+          _id: null,
+          totalExpense: { $sum: "$amount" },
+          totalExpenseCount: { $sum: 1 },
+        },
+      },
+    ];
+
+    const [expenseResult] = await Expense.aggregate(expensePipeline).allowDiskUse(true);
 
     return res.json({
-      summary: result?.summary || { totalSales: 0, totalProfit: 0, totalOrders: 0 },
-      salesTrend: result?.salesTrend || [],
+      summary: {
+        ...(invoiceResult?.summary || { totalSales: 0, totalProfit: 0, totalOrders: 0 }),
+        totalExpense: expenseResult?.totalExpense || 0,
+        totalExpenseCount: expenseResult?.totalExpenseCount || 0,
+      },
+      salesTrend: invoiceResult?.salesTrend || [],
     });
   } catch (error) {
     console.error("Error generating report:", error);
