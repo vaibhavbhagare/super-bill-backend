@@ -49,8 +49,8 @@ exports.sendWhatsAppMessageTwilioShortInvoice = async (invoice, customer) => {
       address1: `अंकोली & `,
       address2: `अंकोली-शेजबाभूळगाव चौक`,
       phoneNumber: "9764384901",
-      instaUrl: "https://www.instagram.com/bhagaresupermarket",
-      onlineWebUrl: "https://bhagaresupermarket.electrobizz.com",
+      instaUrl: "https://tinyurl.com/bhagare-shop-insta",
+      onlineWebUrl: "https://tinyurl.com/shop-bhagare",
     };
     const customerPhoneReceiver = normalizePhoneNumber(customer.phoneNumber);
 
@@ -129,11 +129,45 @@ function truncateText(text, maxLength) {
   return value.length <= maxLength ? value : value.slice(0, maxLength);
 }
 
+// Normalize customer names: if Latin letters are all caps, convert to Title Case.
+// Preserve non-Latin scripts (e.g., Devanagari) as-is.
+function normalizeCustomerName(name) {
+  const value = String(name || "").trim();
+  if (!value) return value;
+  const hasDevanagari = /[\u0900-\u097F]/.test(value);
+  if (hasDevanagari) return value;
+  const lettersOnly = value.replace(/[^A-Za-z\s']+/g, "");
+  const isAllCaps = lettersOnly && lettersOnly === lettersOnly.toUpperCase();
+  if (!isAllCaps) return value;
+  return value
+    .toLowerCase()
+    .split(/\s+/)
+    .map((w) => (w ? w.charAt(0).toUpperCase() + w.slice(1) : w))
+    .join(" ");
+}
+
+// Formats a date into dd/mm/YYYY HH:MM in Asia/Kolkata timezone
+function formatDateTimeIST(dateInput) {
+  const date = new Date(dateInput);
+  const formatter = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  const parts = formatter.formatToParts(date);
+  const get = (type) => parts.find((p) => p.type === type)?.value || "";
+  return `${get("day")}/${get("month")}/${get("year")} ${get("hour")}:${get("minute")}`;
+}
+
 function generateMarathiInvoiceParams(invoice, customer) {
   const date = new Date(invoice.createdAt).toLocaleDateString("hi-IN");
   const billNo =
     invoice.invoiceNumber || invoice._id.toString().slice(-6).toUpperCase();
-  const customerName = customer.fullName || "ग्राहक";
+  const customerName = normalizeCustomerName(customer.fullName) || "ग्राहक";
   // const productLength = invoice.buyingProducts.length;
 
   const productLines = invoice.buyingProducts
@@ -173,7 +207,7 @@ function generateMarathiInvoiceParamsTwilio(invoice, customer, storeInfo) {
   const date = new Date(invoice.createdAt).toLocaleDateString("hi-IN");
   const billNo =
     invoice.invoiceNumber || invoice._id?.toString().slice(-6).toUpperCase();
-  const customerName = customer?.fullName || "ग्राहक";
+  const customerName = normalizeCustomerName(customer?.fullName) || "ग्राहक";
   const productLines = invoice.buyingProducts
     .map((item) => {
       const qtyUnit = item.quantity;
@@ -223,13 +257,13 @@ function generateMarathiInvoiceParamsTwilioShortInvoice(
   customer,
   storeInfo
 ) {
-  const date = new Date(invoice.createdAt).toLocaleDateString("hi-IN");
+  const date = formatDateTimeIST(invoice.createdAt);
   const billNo =
     invoice.invoiceNumber || invoice._id?.toString().slice(-6).toUpperCase();
 
-  const customerName = customer?.fullName || "ग्राहक";
+  const customerName = normalizeCustomerName(customer?.fullName) || "ग्राहक";
 
-  const productLines = `आपण *एकूण ${invoice?.buyingProducts?.length || 0} वस्तू* खरेदी केल्या आहेत.`;
+  const productLines = `*एकूण ${invoice?.buyingProducts?.length || 0} वस्तू*`;
 
   const {
     subtotal = 0,
@@ -262,8 +296,8 @@ function generateMarathiInvoiceParamsTwilioShortInvoice(
     10: invoice.channel || "POS", // पेमेंट प्रकार
     11: `${address1} ${address2}`, // channel
     12: phone, // मोबाईल क्रमांक //
-    13: storeInfo.onlineWebUrl, // मोबाईल क्रमांक //
-    14: storeInfo.instaUrl, // मोबाईल क्रमांक
+    13: `${storeInfo.onlineWebUrl}`, // मोबाईल क्रमांक //
+    14: `${storeInfo.instaUrl}`, // मोबाईल क्रमांक
   };
 }
 function normalizePhoneNumber(input) {
