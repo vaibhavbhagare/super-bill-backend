@@ -96,12 +96,19 @@ const isDev =
   process.env.NODE_ENV === "development" ||
   process.env.NODE_ENV === "local" ||
   process.env.NODE_ENV === "dev";
-const mongoUri = isDev ? process.env.LOCAL_MONGO_URI : process.env.REMOTE_MONGO_URI;
+// Prefer a single standard var in prod: MONGODB_URI. Fallbacks kept for compatibility.
+const mongoUri = isDev
+  ? (process.env.LOCAL_MONGO_URI || process.env.MONGODB_URI)
+  : (process.env.MONGODB_URI || process.env.REMOTE_MONGO_URI);
+
+// Avoid silent buffering if DB is unreachable
+mongoose.set("bufferCommands", false);
 
 mongoose
   .connect(mongoUri, {
     useNewUrlParser: true,
     useUnifiedTopology: true,
+    serverSelectionTimeoutMS: 5000,
   })
   .then(() => console.log(`Connected to MongoDB: ${mongoUri}`))
   .catch((err) => console.error("MongoDB connection error:", err));
