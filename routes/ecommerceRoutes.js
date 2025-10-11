@@ -22,6 +22,30 @@ router.get("/products",
   ecommerceController.getProducts
 );
 
+// Featured products: top sellers in stock (min 15)
+router.get(
+  "/products/featured",
+  productSearchLimiter,
+  validateEcommerceRequest,
+  ecommerceController.getFeaturedProducts
+);
+
+// Trending products: recent top sellers in stock
+router.get(
+  "/products/trending",
+  productSearchLimiter,
+  validateEcommerceRequest,
+  ecommerceController.getTrendingProducts
+);
+
+// Recommendations based on customer history (categories affinity)
+router.get(
+  "/products/recommended",
+  productSearchLimiter,
+  validateEcommerceRequest,
+  ecommerceController.getRecommendedProducts
+);
+
 router.get("/products/filters", 
   productSearchLimiter, 
   validateEcommerceRequest, 
