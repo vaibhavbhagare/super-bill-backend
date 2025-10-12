@@ -2,6 +2,7 @@ const Invoice = require("../models/Invoice");
 const Product = require("../models/Product");
 const Customer = require("../models/Customer");
 const ProductStats = require("../models/ProductStats");
+const Order = require("../models/Order");
 const whatsappService = require("./whatsappService");
 
 // Create Invoice
@@ -207,6 +208,86 @@ exports.deleteInvoice = async (req, res) => {
     res.json({ message: "Invoice deleted" });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+};
+
+// Public: recent purchases (live feed) combining invoices + orders
+exports.getRecentPurchases = async (req, res) => {
+  try {
+    const limit = Number(req.query.limit) > 0 ? Math.min(Number(req.query.limit), 20) : 5;
+
+    const baseNotDeleted = { $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }] };
+    const excludedPhone = 9764384901;
+    const phoneExclusion = {
+      $or: [
+        { "customerSnapshot.phoneNumber": { $nin: [excludedPhone, String(excludedPhone)] } },
+        { "customerSnapshot.phoneNumber": { $exists: false } },
+      ],
+    };
+
+    // Fetch latest invoices and orders, then merge
+    const [invDocs, invCount, ordDocs, ordCount] = await Promise.all([
+      Invoice.find({ ...baseNotDeleted, ...phoneExclusion })
+        .select("buyingProducts customer customerSnapshot createdAt")
+        .populate("customer", "fullName phoneNumber")
+        .sort({ createdAt: -1 })
+        .limit(limit)
+        .lean(),
+      Invoice.countDocuments({ ...baseNotDeleted, ...phoneExclusion }),
+      Order.find({ ...baseNotDeleted, status: { $ne: "CART" }, ...phoneExclusion })
+        .select("items customer customerSnapshot createdAt")
+        .populate("customer", "fullName phoneNumber")
+        .sort({ createdAt: -1 })
+        .limit(limit)
+        .lean(),
+      Order.countDocuments({ ...baseNotDeleted, status: { $ne: "CART" }, ...phoneExclusion }),
+    ]);
+
+    const invMapped = invDocs.map((inv) => ({
+      createdAt: inv.createdAt,
+      customerName:
+        (inv.customer && inv.customer.fullName) ||
+        (inv.customerSnapshot && inv.customerSnapshot.fullName) ||
+        "Customer",
+      products: (inv.buyingProducts || []).map((p) => ({
+        name: p.name,
+        secondName: p.secondName,
+        qty: p.quantity,
+        price: p.price,
+        subtotal: p.subtotal,
+      })),
+    }));
+
+    const ordMapped = ordDocs.map((o) => ({
+      createdAt: o.createdAt,
+      customerName:
+        (o.customer && o.customer.fullName) ||
+        (o.customerSnapshot && o.customerSnapshot.fullName) ||
+        "Customer",
+      products: (o.items || []).map((it) => ({
+        name: it.name,
+        secondName: it.secondName,
+        qty: it.quantity,
+        price: it.price,
+        subtotal: it.subtotal,
+      })),
+    }));
+
+    // Merge by createdAt desc and take top N
+    const merged = invMapped.concat(ordMapped).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, limit);
+
+    const totalCount = invCount + ordCount;
+
+    // Return only requested fields
+    const recentPurchases = merged.map((m) => ({
+      customerName: m.customerName,
+      products: m.products,
+    }));
+
+    return res.status(200).json({ success: true, data: { totalCount, recentPurchases } });
+  } catch (err) {
+    console.error("❌ Error in getRecentPurchases:", err.message);
+    return res.status(500).json({ success: false, error: "Server error" });
   }
 };
 

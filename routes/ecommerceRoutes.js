@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const ecommerceController = require("../controllers/ecommerceController");
 const ecommerceOrderController = require("../controllers/ecommerceOrderController");
+const invoiceController = require("../controllers/invoiceController");
 const { auth, optionalAuth } = require("../middleware/auth");
 const {
   productSearchLimiter,
@@ -70,6 +71,8 @@ router.get("/categories",
   categoriesListLimiter,
   ecommerceController.getCategories
 );
+
+router.get("/purchases/live", invoiceController.getRecentPurchases);
 
 // Orders (no server-side cart)
 router.post("/orders/place", optionalAuth, ecommerceOrderController.placeOrder);
