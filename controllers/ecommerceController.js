@@ -6,100 +6,158 @@ const Order = require("../models/Order");
 // Public API - Get products with advanced search and filtering
 const getProducts = async (req, res) => {
   try {
+    // Pagination
+    const page = Number(req.query.page) > 0 ? Number(req.query.page) : 1;
+    const limit = Number(req.query.limit) > 0 ? Number(req.query.limit) : 20;
+    const skip = (page - 1) * limit;
+
+    // Params
     const {
-      page = 1,
-      limit = 20,
-      search,
+      search = "",
       category,
       brand,
+      hasImage,
+      inStock,
       minPrice,
       maxPrice,
       onSale,
-      sortBy = "createdAt",
+      sortBy = "updatedAt",
       sortOrder = "desc",
     } = req.query;
 
-    // Build filter object - use existing product structure
-    const filter = {
-      deletedAt: null, // Only filter by deletedAt since that's what your products have
-    };
+    // -----------------------------
+    // Filter builder
+    // -----------------------------
+    const andConditions = [];
 
-    // Text search
-    if (search) {
-      filter.$text = { $search: search };
+    // Soft delete filter
+    andConditions.push({
+      $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
+    });
+
+    // -----------------------------
+    // 🔍 Fuzzy Search (handles typos)
+    // -----------------------------
+    if (search && String(search).trim()) {
+      const normalized = String(search).trim();
+      // "sakhar" → /s.*a.*k.*h.*a.*r/i
+      const searchRegex = new RegExp(normalized.split("").join(".*"), "i");
+
+      andConditions.push({
+        $or: [
+          { name: { $regex: searchRegex } },
+          { secondName: { $regex: searchRegex } },
+          { brand: { $regex: searchRegex } },
+          {
+            $expr: {
+              $regexMatch: {
+                input: { $toString: "$barcode" },
+                regex: normalized,
+                options: "i",
+              },
+            },
+          },
+        ],
+      });
     }
 
-    // Category filter (supports comma-separated category ids) and alias categoryId/categoryIds
-    const categoryParam = category || req.query.categoryId || req.query.categoryIds;
-    if (categoryParam) {
-      const categoryIds = String(categoryParam)
+    // -----------------------------
+    // 🏷️ Category filter
+    // -----------------------------
+    if (category) {
+      const categoryIds = String(category)
         .split(",")
         .map((id) => id.trim())
         .filter(Boolean);
-      filter.categories = { $in: categoryIds };
+      andConditions.push({ categories: { $in: categoryIds } });
     }
 
-    // Brand filter
-    if (brand) {
-      filter.brand = brand;
-    }
-    filter.hasImage = true;
-    // Price range filter
-    if (minPrice || maxPrice) {
-      filter.sellingPrice1 = {};
-      if (minPrice) filter.sellingPrice1.$gte = parseFloat(minPrice);
-      if (maxPrice) filter.sellingPrice1.$lte = parseFloat(maxPrice);
+    // -----------------------------
+    // 🏭 Brand filter
+    // -----------------------------
+    if (brand) andConditions.push({ brand });
+
+    // -----------------------------
+    // 💰 Price range filter
+    // -----------------------------
+    const priceCond = {};
+    if (minPrice) priceCond.$gte = Number(minPrice);
+    if (maxPrice) priceCond.$lte = Number(maxPrice);
+    if (Object.keys(priceCond).length > 0) {
+      andConditions.push({ sellingPrice1: priceCond });
     }
 
-    // Sale filter - check if discount exists
+    // -----------------------------
+    // 🔥 On sale filter
+    // -----------------------------
     if (onSale === "true") {
-      filter.discountPercentage = { $gt: 0 };
+      andConditions.push({
+        $or: [
+          { discountPercentage: { $gt: 0 } },
+          { $expr: { $gt: ["$mrp", "$sellingPrice1"] } },
+        ],
+      });
     }
 
-    // Build sort object
+    // -----------------------------
+    // 📦 Stock filter
+    // -----------------------------
+    if (inStock === "true") {
+      andConditions.push({ stock: { $gt: 0 } });
+    }
+
+    // -----------------------------
+    // 🖼️ Image filter
+    // -----------------------------
+    if (hasImage === "YES") andConditions.push({ hasImage: true });
+    if (hasImage === "NO") {
+      andConditions.push({
+        $or: [
+          { hasImage: false },
+          { hasImage: null },
+          { hasImage: { $exists: false } },
+        ],
+      });
+    }
+
+    // -----------------------------
+    // Final filter and sort
+    // -----------------------------
+    const filter = andConditions.length ? { $and: andConditions } : {};
     const sort = {};
     sort[sortBy] = sortOrder === "desc" ? -1 : 1;
 
-    // Pagination
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-    const limitNum = parseInt(limit);
+    // -----------------------------
+    // Fetch products + count
+    // -----------------------------
+    const [products, total] = await Promise.all([
+      Product.find(filter)
+        .select(
+          "-deletedAt -deletedBy -isSynced -createdBy -updatedBy -purchasePrice -updatedAt"
+        )
+        .sort(sort)
+        .skip(skip)
+        .limit(limit)
+        .populate("categories", "name secondaryName slug")
+        .lean(),
+      Product.countDocuments(filter),
+    ]);
 
-    // Execute query with pagination
-    const products = await Product.find(filter)
-      .select(
-        "-deletedAt -deletedBy -isSynced -createdBy -updatedBy -purchasePrice -updatedAt"
-      )
-      .sort(sort)
-      .skip(skip)
-      .limit(limitNum)
-      .lean();
-
-    // Get total count for pagination
-    const total = await Product.countDocuments(filter);
-
-    // Calculate pagination info
-    const totalPages = Math.ceil(total / limitNum);
-    const hasNextPage = page < totalPages;
-    const hasPrevPage = page > 1;
-
-    // Add discount calculation and e-commerce fields based on existing data
+    // -----------------------------
+    // Add computed fields
+    // -----------------------------
     const productsWithDiscount = products.map((product) => ({
       ...product,
-      // Use existing discountPercentage or calculate from mrp and sellingPrice1
       discountPercentage:
         product.discountPercentage ||
         (product.mrp > 0
-          ? Math.round(
-              ((product.mrp - product.sellingPrice1) / product.mrp) * 100
-            )
+          ? Math.round(((product.mrp - product.sellingPrice1) / product.mrp) * 100)
           : 0),
       discountAmount: product.mrp - product.sellingPrice1,
-      // Set e-commerce fields based on existing data
-      isActive: true, // Assume all non-deleted products are active
+      isActive: true,
       isOnSale:
         (product.discountPercentage && product.discountPercentage > 0) ||
         product.mrp > product.sellingPrice1,
-      // Add description if it doesn't exist
       description:
         product.description ||
         product.name ||
@@ -107,29 +165,33 @@ const getProducts = async (req, res) => {
         "Product description not available",
     }));
 
-    res.json({
+    // -----------------------------
+    // Response (same structure)
+    // -----------------------------
+    res.status(200).json({
       success: true,
       data: {
         products: productsWithDiscount,
         pagination: {
-          currentPage: parseInt(page),
-          totalPages,
+          currentPage: page,
+          totalPages: Math.ceil(total / limit),
           total,
-          limit: limitNum,
-          hasNextPage,
-          hasPrevPage,
+          limit,
+          hasNextPage: page * limit < total,
+          hasPrevPage: page > 1,
         },
       },
     });
-  } catch (error) {
-    console.error("Error fetching products:", error);
+  } catch (err) {
+    console.error("❌ Error in getProducts:", err.message);
     res.status(500).json({
       success: false,
-      error: "Failed to fetch products",
-      message: error.message,
+      error: "Server error",
+      message: err.message,
     });
   }
 };
+
 
 // Public API - Get product by ID with enhanced details
 const getProductById = async (req, res) => {
@@ -196,7 +258,8 @@ const getProductFilters = async (req, res) => {
       deletedAt: null,
     };
 
-    const categoryParam = category || req.query.categoryId || req.query.categoryIds;
+    const categoryParam =
+      category || req.query.categoryId || req.query.categoryIds;
     if (categoryParam) {
       const categoryIds = String(categoryParam)
         .split(",")
@@ -289,7 +352,9 @@ module.exports = {
           stock: { $gt: 0 },
           hasImage: true,
         })
-          .select("name secondName barcode categories stock mrp sellingPrice1 brand description discountPercentage isOnSale hasImage")
+          .select(
+            "name secondName barcode categories stock mrp sellingPrice1 brand description discountPercentage isOnSale hasImage"
+          )
           .sort({ createdAt: -1 })
           .limit(limit - products.length)
           .lean();
@@ -302,7 +367,9 @@ module.exports = {
         discountPercentage:
           product.discountPercentage ||
           (product.mrp > 0
-            ? Math.round(((product.mrp - product.sellingPrice1) / product.mrp) * 100)
+            ? Math.round(
+                ((product.mrp - product.sellingPrice1) / product.mrp) * 100
+              )
             : 0),
         discountAmount: product.mrp - product.sellingPrice1,
         isOnSale:
@@ -318,7 +385,13 @@ module.exports = {
       return res.json({ success: true, data: { products: enriched } });
     } catch (error) {
       console.error("Error fetching featured products:", error);
-      return res.status(500).json({ success: false, error: "Failed to fetch featured products", message: error.message });
+      return res
+        .status(500)
+        .json({
+          success: false,
+          error: "Failed to fetch featured products",
+          message: error.message,
+        });
     }
   },
   // Public API - Trending products: recent high sales velocity
@@ -331,7 +404,12 @@ module.exports = {
       // Trending heuristic: most units sold recently (online + pos)
       const recentTop = await ProductStats.aggregate([
         { $match: { lastSoldAt: { $gte: sinceDate } } },
-        { $project: { product: 1, score: { $add: ["$onlineUnitsSold", "$posUnitsSold"] } } },
+        {
+          $project: {
+            product: 1,
+            score: { $add: ["$onlineUnitsSold", "$posUnitsSold"] },
+          },
+        },
         { $sort: { score: -1 } },
         { $limit: limit * 3 },
       ]);
@@ -358,7 +436,9 @@ module.exports = {
           stock: { $gt: 0 },
           hasImage: true,
         })
-          .select("name secondName barcode categories stock mrp sellingPrice1 brand description discountPercentage isOnSale hasImage")
+          .select(
+            "name secondName barcode categories stock mrp sellingPrice1 brand description discountPercentage isOnSale hasImage"
+          )
           .sort({ updatedAt: -1 })
           .limit(limit - products.length)
           .lean();
@@ -370,7 +450,9 @@ module.exports = {
         discountPercentage:
           product.discountPercentage ||
           (product.mrp > 0
-            ? Math.round(((product.mrp - product.sellingPrice1) / product.mrp) * 100)
+            ? Math.round(
+                ((product.mrp - product.sellingPrice1) / product.mrp) * 100
+              )
             : 0),
         discountAmount: product.mrp - product.sellingPrice1,
         isOnSale:
@@ -386,7 +468,13 @@ module.exports = {
       return res.json({ success: true, data: { products: enriched } });
     } catch (error) {
       console.error("Error fetching trending products:", error);
-      return res.status(500).json({ success: false, error: "Failed to fetch trending products", message: error.message });
+      return res
+        .status(500)
+        .json({
+          success: false,
+          error: "Failed to fetch trending products",
+          message: error.message,
+        });
     }
   },
   // Public API - Recommendations based on customer's recent category affinity
@@ -415,7 +503,10 @@ module.exports = {
             if (prod && Array.isArray(prod.categories)) {
               for (const cat of prod.categories) {
                 const key = String(cat);
-                categoryScores.set(key, (categoryScores.get(key) || 0) + (it.quantity || 1));
+                categoryScores.set(
+                  key,
+                  (categoryScores.get(key) || 0) + (it.quantity || 1)
+                );
               }
             }
           }
@@ -437,7 +528,9 @@ module.exports = {
           stock: { $gt: 0 },
           hasImage: true,
         })
-          .select("name secondName barcode categories stock mrp sellingPrice1 brand description discountPercentage isOnSale hasImage")
+          .select(
+            "name secondName barcode categories stock mrp sellingPrice1 brand description discountPercentage isOnSale hasImage"
+          )
           .sort({ updatedAt: -1 })
           .limit(limit)
           .lean();
@@ -451,7 +544,9 @@ module.exports = {
           stock: { $gt: 0 },
           hasImage: true,
         })
-          .select("name secondName barcode categories stock mrp sellingPrice1 brand description discountPercentage isOnSale hasImage")
+          .select(
+            "name secondName barcode categories stock mrp sellingPrice1 brand description discountPercentage isOnSale hasImage"
+          )
           .sort({ updatedAt: -1 })
           .limit(limit - products.length)
           .lean();
@@ -463,7 +558,9 @@ module.exports = {
         discountPercentage:
           product.discountPercentage ||
           (product.mrp > 0
-            ? Math.round(((product.mrp - product.sellingPrice1) / product.mrp) * 100)
+            ? Math.round(
+                ((product.mrp - product.sellingPrice1) / product.mrp) * 100
+              )
             : 0),
         discountAmount: product.mrp - product.sellingPrice1,
         isOnSale:
@@ -479,7 +576,13 @@ module.exports = {
       return res.json({ success: true, data: { products: enriched } });
     } catch (error) {
       console.error("Error fetching recommendations:", error);
-      return res.status(500).json({ success: false, error: "Failed to fetch recommendations", message: error.message });
+      return res
+        .status(500)
+        .json({
+          success: false,
+          error: "Failed to fetch recommendations",
+          message: error.message,
+        });
     }
   },
   // Public API - Get all categories for e-commerce (with cache and cache headers)
@@ -493,7 +596,7 @@ module.exports = {
       const cached = global.__ecommCache[cacheKey];
       const now = Date.now();
       const ttlMs = 5 * 60 * 1000; // 5 minutes
-      if (cached && (now - cached.ts) < ttlMs) {
+      if (cached && now - cached.ts < ttlMs) {
         res.set("Cache-Control", "public, max-age=60, s-maxage=60");
         return res.json({ success: true, data: cached.value });
       }
@@ -521,5 +624,5 @@ module.exports = {
         message: error.message,
       });
     }
-  }
+  },
 };
