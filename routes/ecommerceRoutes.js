@@ -31,6 +31,14 @@ router.get(
   ecommerceController.getProductAutocomplete
 );
 
+// Autosuggest alias (public)
+router.get(
+  "/products/autosuggest",
+  productSearchLimiter,
+  validateEcommerceRequest,
+  ecommerceController.getProductAutocomplete
+);
+
 // Featured products: top sellers in stock (min 15)
 router.get(
   "/products/featured",
