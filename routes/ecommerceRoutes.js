@@ -66,12 +66,11 @@ router.get("/categories",
 // Orders (no server-side cart)
 router.post("/orders/place", optionalAuth, ecommerceOrderController.placeOrder);
 router.get("/orders", auth, ecommerceOrderController.listOrders);
+// Specific customer order routes must be before ":id"
+router.get("/orders/by-customer/:customerId", optionalAuth, ecommerceOrderController.listOrdersByCustomer);
+router.get("/orders/my", auth, ecommerceOrderController.listMyOrders);
 router.get("/orders/:id", auth, ecommerceOrderController.getOrder);
 router.post("/orders/:id/status", auth, ecommerceOrderController.updateStatus);
 router.post("/orders/:id/cancel", optionalAuth, ecommerceOrderController.cancelOrder);
-
-// Customer order listing
-router.get("/orders/by-customer/:customerId", optionalAuth, ecommerceOrderController.listOrdersByCustomer);
-router.get("/orders/my", auth, ecommerceOrderController.listMyOrders);
 
 module.exports = router;

@@ -286,6 +286,10 @@ exports.cancelOrder = async (req, res) => {
 exports.getOrder = async (req, res) => {
   try {
     const { id } = req.params;
+    const mongoose = require("mongoose");
+    if (!mongoose.Types.ObjectId.isValid(String(id))) {
+      return res.status(400).json({ success: false, error: "Invalid order id" });
+    }
     const order = await Order.findById(id).populate("items.product");
     if (!order) return res.status(404).json({ success: false, error: "Order not found" });
     res.json({ success: true, data: order });
@@ -299,9 +303,67 @@ exports.listOrders = async (req, res) => {
     if (!req.user || req.user.role !== "admin") {
       return res.status(403).json({ success: false, error: "Admin only" });
     }
-    const { status, page = 1, limit = 20 } = req.query;
-    const filter = { deletedAt: null };
-    if (status) filter.status = status;
+    const {
+      status,
+      paymentMethod,
+      paymentStatus,
+      customerId,
+      customer, // can be id or name/phone search string
+      dateFrom,
+      dateTo,
+      placedFrom,
+      placedTo,
+      page = 1,
+      limit = 20,
+    } = req.query;
+
+    const andConditions = [
+      { $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }] },
+    ];
+
+    if (status) andConditions.push({ status });
+    if (paymentMethod) andConditions.push({ paymentMethod });
+    if (paymentStatus) andConditions.push({ paymentStatus });
+
+    // Customer filters
+    if (customerId) {
+      try {
+        andConditions.push({ customer: require("mongoose").Types.ObjectId.createFromHexString(String(customerId)) });
+      } catch (_) {
+        // ignore invalid id
+      }
+    } else if (customer) {
+      const mongoose = require("mongoose");
+      const conds = [];
+      if (mongoose.Types.ObjectId.isValid(String(customer))) {
+        conds.push({ customer: new mongoose.Types.ObjectId(String(customer)) });
+      }
+      // name regex and phone equality from snapshot
+      conds.push({ "customerSnapshot.fullName": { $regex: String(customer), $options: "i" } });
+      const asNumber = Number(customer);
+      if (!Number.isNaN(asNumber)) {
+        conds.push({ "customerSnapshot.phoneNumber": asNumber });
+      }
+      andConditions.push({ $or: conds });
+    }
+
+    // Date filters: createdAt range
+    if (dateFrom || dateTo) {
+      const createdRange = {};
+      if (dateFrom) createdRange.$gte = new Date(dateFrom);
+      if (dateTo) createdRange.$lte = new Date(dateTo);
+      andConditions.push({ createdAt: createdRange });
+    }
+    // placedAt range
+    if (placedFrom || placedTo) {
+      const placedRange = {};
+      if (placedFrom) placedRange.$gte = new Date(placedFrom);
+      if (placedTo) placedRange.$lte = new Date(placedTo);
+      andConditions.push({ placedAt: placedRange });
+    }
+
+    const filter = andConditions.length > 1 ? { $and: andConditions } : andConditions[0];
+
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const [orders, total] = await Promise.all([
       Order.find(filter).sort({ createdAt: -1 }).skip(skip).limit(parseInt(limit)),
