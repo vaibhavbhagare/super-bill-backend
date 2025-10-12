@@ -18,14 +18,16 @@ function generateOnlineInvoiceNumber() {
 
 // Helpers
 const calculateSummary = (items) => {
-  const subtotal = items.reduce((sum, it) => sum += (it.subtotal || (it.quantity * it.price)), 0);
-  const discount = items.reduce((sum, it) => sum += (it.discount || 0), 0);
+  const subtotal = items.reduce((sum, it) => sum + (it.subtotal || (it.quantity * it.price)), 0);
+  const discount = items.reduce((sum, it) => sum + (it.discount || 0), 0);
   const gst = 0; // Not specified in e-comm flow
-  const total = subtotal - discount + gst;
+  const total = Math.max(subtotal - discount + gst, 0);
   return { subtotal, discount, gst, total };
 };
 
 const snapshotItemFromProduct = (product, quantity) => {
+  const unitDiscount = Math.max((product.mrp || 0) - (product.sellingPrice1 || 0), 0);
+  const discountAmount = quantity * unitDiscount;
   return {
     product: product._id,
     name: product.name,
@@ -34,7 +36,8 @@ const snapshotItemFromProduct = (product, quantity) => {
     price: product.sellingPrice1,
     purchasePrice: product.purchasePrice,
     mrp: product.mrp,
-    discount: product.discountPercentage ? Math.round(((product.mrp - product.sellingPrice1) / product.mrp) * 100) : 0,
+    // store discount as amount, not percentage
+    discount: discountAmount,
     subtotal: quantity * product.sellingPrice1,
   };
 };
