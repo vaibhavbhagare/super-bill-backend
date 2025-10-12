@@ -28,11 +28,13 @@ const snapshotItemFromProduct = (product, quantity) => {
 
 // CART APIs (per-user simple cart backed by an Order with status CART)
 const getOrCreateCart = async (req) => {
-  const userId = req.user ? req.user._id : null;
-  // For now, associate with user if logged in; otherwise create anonymous cart with createdBy
-  let cart = await Order.findOne({ status: "CART", createdBy: userId ? String(userId) : undefined, deletedAt: null });
+  const actorName = req.user
+    ? req.user.userName
+    : (req.customer ? (req.customer.fullName || req.customer.userName || String(req.customer.phoneNumber) || "customer") : "guest");
+  // Associate by actor label for simplicity
+  let cart = await Order.findOne({ status: "CART", createdBy: actorName, deletedAt: null });
   if (!cart) {
-    cart = await Order.create({ status: "CART", tracking: [{ status: "CART", note: "Cart created", by: userId ? req.user.userName : "guest" }], createdBy: userId ? String(userId) : "guest" });
+    cart = await Order.create({ status: "CART", tracking: [{ status: "CART", note: "Cart created", by: actorName }], createdBy: actorName });
   }
   return cart;
 };
@@ -172,6 +174,9 @@ exports.placeOrder = async (req, res) => {
 
     // Create order directly
     const billingSummary = calculateSummary(items);
+    const actorName = req.user
+      ? req.user.userName
+      : (req.customer ? (req.customer.fullName || req.customer.userName || String(req.customer.phoneNumber) || "customer") : "guest");
     const order = await Order.create({
       items,
       status: "PLACED",
@@ -183,9 +188,9 @@ exports.placeOrder = async (req, res) => {
         ? { fullName: customer.fullName, phoneNumber: customer.phoneNumber, address: customer.address }
         : (customerInfo || {}),
       billingSummary,
-      tracking: [{ status: "PLACED", note: "Order placed", by: req.user ? req.user.userName : "guest" }],
+      tracking: [{ status: "PLACED", note: "Order placed", by: actorName }],
       channel: "ONLINE",
-      createdBy: req.user ? req.user.userName : "guest",
+      createdBy: actorName,
     });
 
     res.json({ success: true, data: order });
@@ -201,7 +206,18 @@ exports.updateStatus = async (req, res) => {
       return res.status(403).json({ success: false, error: "Admin only" });
     }
     const { id } = req.params;
-    const { status, note } = req.body;
+    const { status: rawStatus, note } = req.body;
+    // Normalize incoming statuses to canonical enum
+    const normalize = (s) => String(s || "").trim().toUpperCase()
+      .replace(/\s+/g, " ")
+      .replace(/^APPROVED$/, "CONFIRMED")
+      .replace(/^APPROVE$/, "CONFIRMED")
+      .replace(/^PACKED$/, "PACKING")
+      .replace(/^PACK$/, "PACKING")
+      .replace(/^SHIPPED$/, "OUT FOR DELIVERY")
+      .replace(/^OUT_FOR_DELIVERY$/, "OUT FOR DELIVERY")
+      .replace(/^OUT-FOR-DELIVERY$/, "OUT FOR DELIVERY");
+    const status = normalize(rawStatus);
     const allowed = ["CONFIRMED", "PACKING", "OUT FOR DELIVERY", "DELIVERED", "COMPLETED", "CANCELLED"];
     if (!allowed.includes(status)) {
       return res.status(400).json({ success: false, error: "Invalid status" });
@@ -210,6 +226,10 @@ exports.updateStatus = async (req, res) => {
     if (!order) return res.status(404).json({ success: false, error: "Order not found" });
 
     order.status = status;
+    order.updatedBy = req.user ? req.user.userName : order.updatedBy;
+    if (status === "PLACED" && !order.placedAt) {
+      order.placedAt = new Date();
+    }
     if (status === "CANCELLED") {
       order.cancelledAt = new Date();
       order.cancelledBy = req.user ? req.user.userName : "admin";
@@ -248,7 +268,7 @@ exports.updateStatus = async (req, res) => {
       }
     }
 
-    order.tracking.push({ status, note, by: req.user ? req.user.userName : "system" });
+    order.tracking.push({ status, note, by: req.user ? req.user.userName : "system", at: new Date() });
     await order.save();
     res.json({ success: true, data: order });
   } catch (err) {
