@@ -70,4 +70,8 @@ router.get("/orders/:id", auth, ecommerceOrderController.getOrder);
 router.post("/orders/:id/status", auth, ecommerceOrderController.updateStatus);
 router.post("/orders/:id/cancel", optionalAuth, ecommerceOrderController.cancelOrder);
 
+// Customer order listing
+router.get("/orders/by-customer/:customerId", optionalAuth, ecommerceOrderController.listOrdersByCustomer);
+router.get("/orders/my", auth, ecommerceOrderController.listMyOrders);
+
 module.exports = router;

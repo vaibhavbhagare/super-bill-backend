@@ -313,4 +313,52 @@ exports.listOrders = async (req, res) => {
   }
 };
 
+// LIST ORDERS BY CUSTOMER ID (public with optional auth)
+exports.listOrdersByCustomer = async (req, res) => {
+  try {
+    const { customerId } = req.params;
+    const { status, page = 1, limit = 20 } = req.query;
+    if (!customerId) {
+      return res.status(400).json({ success: false, error: "customerId is required" });
+    }
+
+    const filter = { deletedAt: null, customer: customerId };
+    if (status) filter.status = status;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const [orders, total] = await Promise.all([
+      Order.find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit)),
+      Order.countDocuments(filter),
+    ]);
+    return res.json({ success: true, data: { orders, pagination: { currentPage: parseInt(page), total, limit: parseInt(limit) } } });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: "Failed to list customer orders", message: err.message });
+  }
+};
+
+// LIST AUTHENTICATED CUSTOMER'S ORDERS
+exports.listMyOrders = async (req, res) => {
+  try {
+    if (!req.customer || !req.customer._id) {
+      return res.status(401).json({ success: false, error: "Customer authentication required" });
+    }
+    const { status, page = 1, limit = 20 } = req.query;
+    const filter = { deletedAt: null, customer: req.customer._id };
+    if (status) filter.status = status;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const [orders, total] = await Promise.all([
+      Order.find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit)),
+      Order.countDocuments(filter),
+    ]);
+    return res.json({ success: true, data: { orders, pagination: { currentPage: parseInt(page), total, limit: parseInt(limit) } } });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: "Failed to list my orders", message: err.message });
+  }
+};
+
 
