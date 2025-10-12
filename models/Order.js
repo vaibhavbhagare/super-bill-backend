@@ -63,6 +63,12 @@ const orderSchema = new mongoose.Schema(
       index: true,
     },
     tracking: [orderTrackingSchema],
+    orderType: {
+      type: String,
+      enum: ["HOME_DELIVERY", "STORE_PICKUP"],
+      default: "HOME_DELIVERY",
+      index: true,
+    },
     billingSummary: {
       total: Number,
       subtotal: Number,

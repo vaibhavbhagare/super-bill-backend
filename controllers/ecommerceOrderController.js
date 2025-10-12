@@ -3,6 +3,19 @@ const Product = require("../models/Product");
 const Customer = require("../models/Customer");
 const Invoice = require("../models/Invoice");
 
+// Helpers: generate a unique-ish online invoice number
+function generateOnlineInvoiceNumber() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  const hh = String(now.getHours()).padStart(2, "0");
+  const mm = String(now.getMinutes()).padStart(2, "0");
+  const ss = String(now.getSeconds()).padStart(2, "0");
+  const rnd = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return `ONLINE-${y}${m}${d}-${hh}${mm}${ss}-${rnd}`;
+}
+
 // Helpers
 const calculateSummary = (items) => {
   const subtotal = items.reduce((sum, it) => sum += (it.subtotal || (it.quantity * it.price)), 0);
@@ -116,7 +129,7 @@ exports.clearCart = async (req, res) => {
 // PLACE ORDER (no server-side cart)
 exports.placeOrder = async (req, res) => {
   try {
-    const { customerId, customerInfo, paymentMethod = "COD", products } = req.body;
+    const { customerId, customerInfo, paymentMethod = "COD", products, orderType } = req.body;
     if (!Array.isArray(products) || products.length === 0) {
       return res.status(400).json({ success: false, error: "products array required" });
     }
@@ -181,6 +194,9 @@ exports.placeOrder = async (req, res) => {
       items,
       status: "PLACED",
       placedAt: new Date(),
+      orderType: ["HOME_DELIVERY", "STORE_PICKUP"].includes((orderType || "").toUpperCase())
+        ? (orderType || "").toUpperCase()
+        : "HOME_DELIVERY",
       paymentMethod,
       paymentStatus: paymentMethod === "ONLINE" ? "PAID" : "UNPAID",
       customer: customer ? customer._id : undefined,
@@ -193,7 +209,7 @@ exports.placeOrder = async (req, res) => {
       createdBy: actorName,
     });
 
-    res.json({ success: true, data: order });
+  res.json({ success: true, data: order });
   } catch (err) {
     res.status(500).json({ success: false, error: "Failed to place order", message: err.message });
   }
@@ -225,7 +241,7 @@ exports.updateStatus = async (req, res) => {
     const order = await Order.findById(id).populate("items.product");
     if (!order) return res.status(404).json({ success: false, error: "Order not found" });
 
-    order.status = status;
+  order.status = status;
     order.updatedBy = req.user ? req.user.userName : order.updatedBy;
     if (status === "PLACED" && !order.placedAt) {
       order.placedAt = new Date();
@@ -241,35 +257,52 @@ exports.updateStatus = async (req, res) => {
     }
     if (status === "COMPLETED") {
       order.completedAt = new Date();
-      // Create invoice if not exists
+      // Create invoice if not exists, with a unique ONLINE invoiceNumber
       if (!order.invoice) {
-        const invoiceDoc = await Invoice.create({
-          buyingProducts: order.items.map((it) => ({
-            product: it.product._id,
-            name: it.name,
-            secondName: it.secondName,
-            quantity: it.quantity,
-            price: it.price,
-            purchasePrice: it.purchasePrice,
-            mrp: it.mrp,
-            discount: it.discount,
-            subtotal: it.subtotal,
-          })),
-          customer: order.customer,
-          billingSummary: order.billingSummary,
-          billerId: req.user ? String(req.user._id) : "system",
-          billerName: req.user ? req.user.userName : "system",
-          transactionType: order.paymentMethod === "ONLINE" ? "ONLINE" : (order.paymentMethod === "CASH" ? "CASH" : "CREDIT"),
-          channel: "ONLINE",
-          createdBy: req.user ? req.user.userName : "system",
-        });
+        let invoiceDoc = null;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            invoiceDoc = await Invoice.create({
+              buyingProducts: order.items.map((it) => ({
+                product: it.product._id,
+                name: it.name,
+                secondName: it.secondName,
+                quantity: it.quantity,
+                price: it.price,
+                purchasePrice: it.purchasePrice,
+                mrp: it.mrp,
+                discount: it.discount,
+                subtotal: it.subtotal,
+              })),
+              customer: order.customer,
+              billingSummary: order.billingSummary,
+              billerId: req.user ? String(req.user._id) : "system",
+              billerName: req.user ? req.user.userName : "system",
+              transactionType: "ONLINE", // e-comm completes as ONLINE
+              invoiceNumber: generateOnlineInvoiceNumber(),
+              channel: "ONLINE",
+              createdBy: req.user ? req.user.userName : "system",
+            });
+            break; // success
+          } catch (err) {
+            if (err && err.code === 11000) {
+              // duplicate invoiceNumber, retry
+              continue;
+            }
+            throw err;
+          }
+        }
+        if (!invoiceDoc) {
+          throw new Error("Failed to create unique invoice number");
+        }
         order.invoice = invoiceDoc._id;
         order.paymentStatus = "PAID"; // assume completed means paid
       }
     }
 
-    order.tracking.push({ status, note, by: req.user ? req.user.userName : "system", at: new Date() });
+  order.tracking.push({ status, note, by: req.user ? req.user.userName : "system", at: new Date() });
     await order.save();
+
     res.json({ success: true, data: order });
   } catch (err) {
     res.status(500).json({ success: false, error: "Failed to update status", message: err.message });
