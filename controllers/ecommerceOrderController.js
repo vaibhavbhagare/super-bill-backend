@@ -202,7 +202,7 @@ exports.updateStatus = async (req, res) => {
     }
     const { id } = req.params;
     const { status, note } = req.body;
-    const allowed = ["CONFIRMED", "PACKING", "SHIPPED", "DELIVERED", "COMPLETED", "CANCELLED"];
+    const allowed = ["CONFIRMED", "PACKING", "OUT FOR DELIVERY", "DELIVERED", "COMPLETED", "CANCELLED"];
     if (!allowed.includes(status)) {
       return res.status(400).json({ success: false, error: "Invalid status" });
     }
