@@ -195,7 +195,9 @@ exports.placeOrder = async (req, res) => {
       : (req.customer ? (req.customer.fullName || req.customer.userName || String(req.customer.phoneNumber) || "customer") : "guest");
     const order = await Order.create({
       items,
-      status: "PLACED",
+      status: (orderType && String(orderType).toUpperCase() === "STORE_PICKUP")
+        ? "READY FOR STORE PICKUP"
+        : "PLACED",
       placedAt: new Date(),
       orderType: ["HOME_DELIVERY", "STORE_PICKUP"].includes((orderType || "").toUpperCase())
         ? (orderType || "").toUpperCase()
