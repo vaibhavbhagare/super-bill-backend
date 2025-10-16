@@ -147,7 +147,7 @@ exports.createInvoice = async (req, res) => {
       }
       // whatsappService.sendTextMessage(invoice, customerData);
       if (sendWhatsappMessage && customerData.phoneNumber !== 9764384901) {
-        whatsappService.sendWhatsAppMessageTwilio(invoice, customerData);
+        whatsappService.sendWhatsAppMessageTwilioShortInvoice(invoice, customerData);
       }
       res.status(201).json(invoice);
     } catch (err) {
