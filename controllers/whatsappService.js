@@ -77,44 +77,6 @@ exports.sendWhatsAppMessageTwilioShortInvoice = async (invoice, customer) => {
   }
 };
 
-exports.sendTextMessage = async (invoice, customer) => {
-  try {
-    const response = await axios({
-      url: "https://graph.facebook.com/v22.0/708120182383703/messages",
-      method: "post",
-      headers: {
-        Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      data: JSON.stringify({
-        messaging_product: "whatsapp",
-        to: "919960038085",
-        type: "template",
-        template: {
-          name: "address_update",
-          language: { code: "mr" },
-          components: [
-            {
-              type: "body",
-              parameters: generateMarathiInvoiceParams(invoice, customer),
-            },
-          ],
-        },
-      }),
-    });
-    console.log("✅ मेसेज यशस्वीरित्या पाठवला गेला:");
-    console.log(response.data);
-  } catch (error) {
-    console.error("❌ मेसेज पाठवताना त्रुटी आली:");
-    if (error.response) {
-      console.error("Status:", error.response.status);
-      console.error("Data:", error.response.data);
-    } else {
-      console.error(error.message);
-    }
-  }
-};
-
 function sanitizeText(text) {
   return text
     .replace(/\n/g, " ") // remove new lines
@@ -313,3 +275,28 @@ function normalizePhoneNumber(input) {
   // Must be exactly 10 digits now
   return digits.length === 10 ? digits : null;
 }
+
+// Send custom WhatsApp message using Twilio
+exports.sendCustomWhatsAppMessage = async (phoneNumber, message) => {
+  try {
+    const normalizedPhone = normalizePhoneNumber(phoneNumber);
+    
+    if (!normalizedPhone) {
+      throw new Error("Invalid phone number format");
+    }
+
+    const sender = process.env.TWILIO_WHATSAPP_FROM;
+    const messageResponse = await client.messages.create({
+      from: sender,
+      to: `whatsapp:+91${normalizedPhone}`,
+      contentSid: process.env.TWILIO_CONTENT_SID_DIWALI,
+      body: ""
+    });
+
+    console.log("✅ Custom WhatsApp message sent:", messageResponse);
+    return messageResponse;
+  } catch (error) {
+    console.error("❌ Error sending custom WhatsApp message:", error.message);
+    throw error;
+  }
+};

@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const ecommerceController = require("../controllers/ecommerceController");
 const ecommerceOrderController = require("../controllers/ecommerceOrderController");
+const invoiceController = require("../controllers/invoiceController");
 const { auth, optionalAuth } = require("../middleware/auth");
 const {
   productSearchLimiter,
@@ -20,6 +21,22 @@ router.get("/products",
   productSearchLimiter, 
   validateEcommerceRequest, 
   ecommerceController.getProducts
+);
+
+// Autocomplete search
+router.get(
+  "/products/autocomplete",
+  productSearchLimiter,
+  validateEcommerceRequest,
+  ecommerceController.getProductAutocomplete
+);
+
+// Autosuggest alias (public)
+router.get(
+  "/products/autosuggest",
+  productSearchLimiter,
+  validateEcommerceRequest,
+  ecommerceController.getProductAutocomplete
 );
 
 // Featured products: top sellers in stock (min 15)
@@ -62,6 +79,8 @@ router.get("/categories",
   categoriesListLimiter,
   ecommerceController.getCategories
 );
+
+router.get("/purchases/live", invoiceController.getRecentPurchases);
 
 // Orders (no server-side cart)
 router.post("/orders/place", optionalAuth, ecommerceOrderController.placeOrder);

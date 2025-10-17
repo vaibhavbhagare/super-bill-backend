@@ -317,6 +317,93 @@ module.exports = {
   getProducts,
   getProductById,
   getProductFilters,
+  // Autocomplete products: fuzzy match on name, secondName, searchKey, brand; filter by brand/category
+  async getProductAutocomplete(req, res) {
+    try {
+      const q = String(req.query.q || req.query.search || "").trim();
+      const limit = Number(req.query.limit) > 0 ? Math.min(Number(req.query.limit), 20) : 10;
+      const brandParam = req.query.brand;
+      const categoryParam = req.query.category || req.query.categoryId || req.query.categoryIds;
+
+      const andConditions = [
+        { $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }] },
+        { isActive: true },
+      ];
+
+      if (q) {
+        const safe = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const fuzzy = new RegExp(q.split("").join(".*"), "i");
+        const partial = new RegExp(safe, "i");
+        const maybeNum = Number(q);
+        const ors = [
+          { name: { $regex: fuzzy } },
+          { secondName: { $regex: fuzzy } },
+          { searchKey: { $regex: fuzzy } },
+          { brand: { $regex: partial } },
+        ];
+        if (!Number.isNaN(maybeNum)) ors.push({ barcode: maybeNum });
+        andConditions.push({ $or: ors });
+      }
+
+      // Brand filter (comma separated)
+      if (brandParam) {
+        const brands = String(brandParam)
+          .split(",")
+          .map((b) => b.trim())
+          .filter(Boolean);
+        if (brands.length) {
+          const brandRegexes = brands.map((b) => new RegExp(`^${b.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$$`, "i"));
+          andConditions.push({ brand: { $in: brandRegexes } });
+        }
+      }
+
+      // Category filter (ids or slugs or names)
+      if (categoryParam) {
+        const raw = String(categoryParam)
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+        const objectIdLike = [];
+        const nameOrSlug = [];
+        for (const token of raw) {
+          if (/^[a-fA-F0-9]{24}$/.test(token)) objectIdLike.push(token);
+          else nameOrSlug.push(token);
+        }
+        let resolvedIds = [...objectIdLike];
+        if (nameOrSlug.length) {
+          const slugTokens = nameOrSlug.map((s) => s.toLowerCase());
+          const nameRegexes = nameOrSlug.map((s) => new RegExp(`^${s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$$`, "i"));
+          const cats = await Category.find({
+            $or: [
+              { slug: { $in: slugTokens } },
+              { name: { $in: nameRegexes } },
+            ],
+            $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
+          })
+            .select("_id")
+            .lean();
+          resolvedIds = resolvedIds.concat(cats.map((c) => String(c._id)));
+        }
+        if (resolvedIds.length) {
+          andConditions.push({ categories: { $in: resolvedIds } });
+        }
+      }
+
+      const filter = andConditions.length ? { $and: andConditions } : {};
+
+      const suggestions = await Product.find(filter)
+        .select("name secondName searchKey brand categories sellingPrice1 mrp stock barcode hasImage")
+        .populate("categories", "name secondaryName slug")
+        .sort({ updatedAt: -1 })
+        .limit(limit)
+        .lean();
+
+      res.json({ success: true, data: suggestions });
+    } catch (error) {
+      console.error("Error fetching autocomplete:", error);
+      res.status(500).json({ success: false, error: "Failed to fetch suggestions", message: error.message });
+    }
+  },
   // Public API - Featured products: top sellers that are in stock, min 15
   async getFeaturedProducts(req, res) {
     try {

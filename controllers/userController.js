@@ -1,8 +1,10 @@
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
 const User = require("../models/User");
+const Customer = require("../models/Customer");
 const { AuthenticationError } = require("../middleware/auth");
 const { addToBlacklist } = require("../services/tokenBlacklist");
+const { sendCustomWhatsAppMessage } = require("./whatsappService");
 
 // Generate JWT token
 const generateToken = (user) => {
@@ -297,6 +299,67 @@ exports.deleteUser = async (req, res) => {
       deletedAt: new Date(),
     });
   } catch (err) {
+    res.status(500).json({
+      error: "Internal server error",
+      code: "INTERNAL_ERROR",
+    });
+  }
+};
+
+exports.sendWhatsAppToAllUsers = async (req, res) => {
+  try {
+
+    // For testing: Get only customer with phone number 9960038085
+ const customers = await Customer.find({
+  $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
+}).select("phoneNumber fullName");
+
+    if (customers.length === 0) {
+      return res.status(404).json({
+        error: "No active customers found",
+        code: "NO_CUSTOMERS_FOUND",
+      });
+    }
+
+    // Send WhatsApp message to each customer
+    const results = [];
+    const errors = [];
+
+    for (const customer of customers) {
+      try {
+        // Send blank message body since template is configured on Twilio
+        await sendCustomWhatsAppMessage(customer.phoneNumber, "");
+        
+        results.push({
+          customerId: customer._id,
+          name: customer.fullName,
+          phoneNumber: customer.phoneNumber,
+          status: "sent"
+        });
+      } catch (error) {
+        console.error(`Error sending WhatsApp to customer ${customer._id}:`, error);
+        errors.push({
+          customerId: customer._id,
+          name: customer.fullName,
+          phoneNumber: customer.phoneNumber,
+          error: error.message,
+          status: "failed"
+        });
+      }
+    }
+
+    res.json({
+      message: "WhatsApp broadcast completed",
+      templateKey: "" || "diwali_offer",
+      totalCustomers: customers.length,
+      successful: results.length,
+      failed: errors.length,
+      results,
+      errors: errors.length > 0 ? errors : undefined
+    });
+
+  } catch (err) {
+    console.error("Send WhatsApp to all customers error:", err);
     res.status(500).json({
       error: "Internal server error",
       code: "INTERNAL_ERROR",
