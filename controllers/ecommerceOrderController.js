@@ -146,7 +146,7 @@ exports.placeOrder = async (req, res) => {
     }
 
     const productIds = requested.map((r) => r.productId);
-    const dbProducts = await Product.find({ _id: { $in: productIds }, deletedAt: null, isActive: true });
+    const dbProducts = await Product.find({ _id: { $in: productIds }, deletedAt: null });
     const idToProduct = new Map(dbProducts.map((doc) => [String(doc._id), doc]));
 
     // Build order items and check stock
