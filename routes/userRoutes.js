@@ -18,4 +18,7 @@ router.get("/:id", userController.getUserById); // Get user by ID
 router.put("/:id", userController.updateUser); // Update user
 router.delete("/:id", userController.deleteUser); // Delete user
 
+// WhatsApp broadcast route
+router.post("/whatsapp-broadcast-diwali", userController.sendWhatsAppToAllUsers); // Send WhatsApp message to all users
+
 module.exports = router;

@@ -7,3 +7,8 @@ node_modules
 
 # Lock file (optional – keep if you want deterministic installs)
 package-lock.json
+
+# Environment files
+.env.*
+!.env.example
+.env

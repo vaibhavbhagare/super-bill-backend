@@ -22,7 +22,9 @@ const createEcommerceLimiter = (windowMs = 15 * 60 * 1000, max = 1000) => {
 
 // Specific rate limiters for different endpoints
 const productSearchLimiter = createEcommerceLimiter(15 * 60 * 1000, 500); // 500 requests per 15 minutes
-const productDetailLimiter = createEcommerceLimiter(15 * 60 * 1000, 200); // 200 requests per 15 minutes
+const productDetailLimiter = createEcommerceLimiter(15 * 60 * 1000, 500); // 200 requests per 15 minutes
+// Higher capacity limiter for categories list (heavily used in UI boot)
+const categoriesListLimiter = createEcommerceLimiter(15 * 60 * 1000, 2000);
 
 // Security headers for e-commerce
 const ecommerceSecurityHeaders = helmet({
@@ -190,4 +192,5 @@ module.exports = {
   validateEcommerceRequest,
   validateSearchQuery,
   sanitizeEcommerceResponse,
+  categoriesListLimiter,
 };

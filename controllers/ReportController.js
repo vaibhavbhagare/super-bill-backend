@@ -1,5 +1,7 @@
 const Invoice = require("../models/Invoice");
 const Product = require("../models/Product");
+const ProductStats = require("../models/ProductStats");
+const Expense = require("../models/Expense");
 const mongoose = require("mongoose");
 
 exports.getReport = async (req, res) => {
@@ -82,7 +84,7 @@ exports.getReport = async (req, res) => {
                 _lineQty: { $ifNull: ["$buyingProducts.quantity", 0] },
                 _linePrice: { $ifNull: ["$buyingProducts.price", 0] },
                 _lineSubtotal: { $ifNull: ["$buyingProducts.subtotal", null] },
-                _purchasePrice: { $ifNull: ["$_prod.purchasePrice", 0] },
+                _purchasePrice: { $ifNull: ["$buyingProducts.purchasePrice", { $ifNull: ["$_prod.purchasePrice", 0] }] },
               },
             },
             {
@@ -150,11 +152,41 @@ exports.getReport = async (req, res) => {
       },
     ];
 
-    const [result] = await Invoice.aggregate(pipeline).allowDiskUse(true);
+    // Execute invoice aggregation
+    const [invoiceResult] = await Invoice.aggregate(pipeline).allowDiskUse(true);
+
+    // Build expense filter with same date range and filters
+    const expenseMatch = {
+      $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
+      expenseDate: { $gte: start, $lte: end },
+    };
+
+    // Add billerId filter for expenses if provided (assuming expenses have createdBy field)
+    if (billerId) {
+      expenseMatch.createdBy = billerId;
+    }
+
+    // Execute expense aggregation
+    const expensePipeline = [
+      { $match: expenseMatch },
+      {
+        $group: {
+          _id: null,
+          totalExpense: { $sum: "$amount" },
+          totalExpenseCount: { $sum: 1 },
+        },
+      },
+    ];
+
+    const [expenseResult] = await Expense.aggregate(expensePipeline).allowDiskUse(true);
 
     return res.json({
-      summary: result?.summary || { totalSales: 0, totalProfit: 0, totalOrders: 0 },
-      salesTrend: result?.salesTrend || [],
+      summary: {
+        ...(invoiceResult?.summary || { totalSales: 0, totalProfit: 0, totalOrders: 0 }),
+        totalExpense: expenseResult?.totalExpense || 0,
+        totalExpenseCount: expenseResult?.totalExpenseCount || 0,
+      },
+      salesTrend: invoiceResult?.salesTrend || [],
     });
   } catch (error) {
     console.error("Error generating report:", error);
@@ -165,7 +197,7 @@ exports.getReport = async (req, res) => {
 
 
 
-const NOT_SOLD_DAYS_DEFAULT = 35; // default value if not provided in query/body
+const NOT_SOLD_DAYS_DEFAULT = 35;
 const LOW_STOCK_THRESHOLD_DEFAULT = 5;
 
 const daysAgo = (days) => {
@@ -176,50 +208,159 @@ const daysAgo = (days) => {
 
 exports.getProductStatsReport = async (req, res) => {
   try {
-    const NOT_SOLD_DAYS = parseInt(
-      req.query.notSoldDays || req.body?.notSoldDays || NOT_SOLD_DAYS_DEFAULT
-    );
-
-    const LOW_STOCK = parseInt(
-      req.query.lowStock || req.body?.lowStock || LOW_STOCK_THRESHOLD_DEFAULT
-    );
+    let { startDate, endDate, transactionType, limit, lowStock, notSoldDays } = req.query;
 
     const today = new Date();
-    const notSoldSince = daysAgo(NOT_SOLD_DAYS);
+    const start = startDate
+      ? new Date(startDate)
+      : new Date(today.getFullYear(), today.getMonth(), 1);
+    start.setHours(0, 0, 0, 0);
+    const end = endDate ? new Date(endDate) : today;
+    end.setHours(23, 59, 59, 999);
 
-    const expiredProducts = await Product.find({
-      expiryDate: { $lt: today },
-      deletedAt: null,
-    }).select("_id name secondName stock expiryDate");
+    const norm = (v) => (typeof v === "string" ? v.trim().toUpperCase() : null);
+    const tx = norm(transactionType);
+    const isOnline = tx === "ONLINE";
+    const useChannelBreakdown = Boolean(tx);
 
-    const lowStockProducts = await Product.find({
-      stock: { $lt: LOW_STOCK },
-      deletedAt: null,
-    }).select("_id name secondName stock");
+    const topLimit = Math.min(Math.max(parseInt(limit || "10", 10), 1), 100);
+    const lowStockThreshold = parseInt(lowStock || LOW_STOCK_THRESHOLD_DEFAULT, 10);
+    const notSellingDays = parseInt(notSoldDays || NOT_SOLD_DAYS_DEFAULT, 10);
 
-    const notSoldProducts = await Product.find({
-      updatedAt: { $lt: notSoldSince },
-      deletedAt: null,
-    }).select("_id name secondName stock updatedAt");
+    const match = { lastSoldAt: { $gte: start, $lte: end } };
 
-    res.json({
-      expired: {
-        count: expiredProducts.length,
-        products: expiredProducts,
+    const pipeline = [
+      { $match: match },
+      {
+        $lookup: {
+          from: "products",
+          localField: "product",
+          foreignField: "_id",
+          as: "_prod",
+        },
       },
-      lowStock: {
-        count: lowStockProducts.length,
-        products: lowStockProducts,
+      { $unwind: { path: "$_prod", preserveNullAndEmptyArrays: true } },
+      {
+        $addFields: {
+          _units: useChannelBreakdown
+            ? (isOnline ? "$onlineUnitsSold" : "$posUnitsSold")
+            : "$totalUnitsSold",
+          _times: useChannelBreakdown
+            ? (isOnline ? "$onlineTimesSold" : "$posTimesSold")
+            : "$totalTimesSold",
+        },
       },
-      notSoldRecently: {
-        since: `${NOT_SOLD_DAYS} days ago`,
-        count: notSoldProducts.length,
-        products: notSoldProducts,
+      {
+        $facet: {
+          topProducts: [
+            {
+              $project: {
+                _id: 0,
+                productId: "$product",
+                name: "$_prod.name",
+                secondName: "$_prod.secondName",
+                stock: "$_prod.stock",
+                expiryDate: "$_prod.expiryDate",
+                unitsSold: { $ifNull: ["$_units", 0] },
+                timesSold: { $ifNull: ["$_times", 0] },
+                lastSoldAt: "$lastSoldAt",
+                lastInvoice: "$lastInvoice",
+              },
+            },
+            { $sort: { unitsSold: -1 } },
+            { $limit: topLimit },
+          ],
+          expiredProducts: [
+            { $match: { "_prod.expiryDate": { $lt: today } } },
+            {
+              $project: {
+                productId: "$product",
+                name: "$_prod.name",
+                secondName: "$_prod.secondName",
+                stock: "$_prod.stock",
+                expiryDate: "$_prod.expiryDate",
+              },
+            },
+          ],
+          lowStockProducts: [
+            { $match: { "_prod.stock": { $lte: lowStockThreshold } } },
+            {
+              $project: {
+                productId: "$product",
+                name: "$_prod.name",
+                secondName: "$_prod.secondName",
+                stock: "$_prod.stock",
+              },
+            },
+          ],
+          notSellingProducts: [
+            {
+              $match: {
+                $or: [
+                  { lastSoldAt: null },
+                  { lastSoldAt: { $lt: daysAgo(notSellingDays) } },
+                ],
+              },
+            },
+            {
+              $project: {
+                productId: "$product",
+                name: "$_prod.name",
+                secondName: "$_prod.secondName",
+                stock: "$_prod.stock",
+                lastSoldAt: "$lastSoldAt",
+              },
+            },
+          ],
+          summary: [
+            {
+              $group: {
+                _id: null,
+                totalUnitsSold: { $sum: { $ifNull: ["$_units", 0] } },
+                totalTimesSold: { $sum: { $ifNull: ["$_times", 0] } },
+                uniqueProductsSold: {
+                  $sum: { $cond: [{ $gt: [{ $ifNull: ["$_units", 0] }, 0] }, 1, 0] },
+                },
+              },
+            },
+          ],
+        },
       },
+      {
+        $project: {
+          topProducts: 1,
+          expiredProducts: 1,
+          lowStockProducts: 1,
+          notSellingProducts: 1,
+          summary: {
+            $let: {
+              vars: { s: { $arrayElemAt: ["$summary", 0] } },
+              in: {
+                totalUnitsSold: { $ifNull: ["$$s.totalUnitsSold", 0] },
+                totalTimesSold: { $ifNull: ["$$s.totalTimesSold", 0] },
+                uniqueProductsSold: { $ifNull: ["$$s.uniqueProductsSold", 0] },
+                scope: useChannelBreakdown ? (isOnline ? "ONLINE" : "POS") : "TOTAL",
+                dateRange: { start, end },
+              },
+            },
+          },
+        },
+      },
+    ];
+
+    const [result] = await ProductStats.aggregate(pipeline).allowDiskUse(true);
+
+    return res.json({
+      summary: result?.summary || {},
+      topProducts: result?.topProducts || [],
+      expiredProducts: result?.expiredProducts || [],
+      lowStockProducts: result?.lowStockProducts || [],
+      notSellingProducts: result?.notSellingProducts || [],
     });
   } catch (error) {
     console.error("Error fetching product stats:", error);
     res.status(500).json({ error: "Internal Server Error" });
   }
 };
+
 

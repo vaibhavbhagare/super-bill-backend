@@ -6,6 +6,7 @@ router.use(auth);
 
 router.post("/", invoiceController.createInvoice);
 router.get("/", invoiceController.getInvoices);
+router.post("/send-whatsapp", invoiceController.sendWhatsAppByInvoiceNumber);
 router.get("/:id", invoiceController.getInvoiceById);
 router.put("/:id", invoiceController.updateInvoice);
 router.delete("/:id", invoiceController.deleteInvoice);

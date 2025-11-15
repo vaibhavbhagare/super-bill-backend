@@ -1,5 +1,6 @@
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
+const Customer = require("../models/Customer");
 const { isBlacklisted } = require("../services/tokenBlacklist");
 
 // Custom error class for authentication errors
@@ -39,13 +40,16 @@ const verifyToken = async (token) => {
       token,
       process.env.JWT_SECRET || "bhagare_super_market",
     );
-    const user = await User.findById(decoded.id).select("-password");
-
-    if (!user) {
-      throw new AuthenticationError("User not found");
+    // If token indicates customer
+    if (decoded.type === "customer" && decoded.customerId) {
+      const customer = await Customer.findById(decoded.customerId);
+      if (!customer) throw new AuthenticationError("Customer not found");
+      return { customer };
     }
-
-    return user;
+    // Else treat as staff user
+    const user = await User.findById(decoded.id).select("-password");
+    if (!user) throw new AuthenticationError("User not found");
+    return { user };
   } catch (error) {
     if (error.name === "JsonWebTokenError") {
       throw new AuthenticationError("Invalid token");
@@ -61,8 +65,9 @@ const verifyToken = async (token) => {
 const auth = async (req, res, next) => {
   try {
     const token = extractToken(req);
-    const user = await verifyToken(token);
-    req.user = user;
+    const identity = await verifyToken(token);
+    req.user = identity.user || null;
+    req.customer = identity.customer || null;
     next();
   } catch (error) {
     if (error instanceof AuthenticationError) {
@@ -82,11 +87,13 @@ const auth = async (req, res, next) => {
 const optionalAuth = async (req, res, next) => {
   try {
     const token = extractToken(req);
-    const user = await verifyToken(token);
-    req.user = user;
+    const identity = await verifyToken(token);
+    req.user = identity.user || null;
+    req.customer = identity.customer || null;
   } catch (error) {
     // Continue without user if authentication fails
     req.user = null;
+    req.customer = null;
   }
   next();
 };

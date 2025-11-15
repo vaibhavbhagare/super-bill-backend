@@ -7,6 +7,7 @@ const models = {
   products: require("../models/Product"),
   users: require("../models/User"),
   customers: require("../models/Customer"),
+  expenses: require("../models/Expense"),
   // add more as needed
 };
 
