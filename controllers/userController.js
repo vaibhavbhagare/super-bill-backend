@@ -257,10 +257,19 @@ exports.getUserById = async (req, res) => {
 // Update user (protected route)
 exports.updateUser = async (req, res) => {
   try {
+    // Extract password separately and exclude it from updateData if not provided
+    const { password, ...otherFields } = req.body;
+    
     const updateData = {
-      ...req.body,
+      ...otherFields,
       updatedBy: req.user.userName,
     };
+
+    // Hash password if it's being updated (only if provided and not empty)
+    if (password && password.trim() !== "") {
+      const salt = await bcrypt.genSalt(10);
+      updateData.password = await bcrypt.hash(password, salt);
+    }
 
     const updated = await User.findByIdAndUpdate(req.params.id, updateData, {
       new: true,
