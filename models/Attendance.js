@@ -9,6 +9,11 @@ const AttendanceSchema = new mongoose.Schema(
       enum: ["present", "absent", "leave", "sick", "halfday"],
       required: true,
     },
+    dailySalary: {
+      type: Number,
+      default: null,
+      min: 0,
+    },
     remarks: String,
     
     // Soft delete fields
