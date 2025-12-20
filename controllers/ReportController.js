@@ -117,12 +117,40 @@ exports.getReport = async (req, res) => {
               },
             },
           ],
-          // Sales trend by day using billingSummary.total (faster)
+          // Sales trend by day using same line-item calculation as summary
           trendAgg: [
+            { $unwind: { path: "$buyingProducts", preserveNullAndEmptyArrays: true } },
+            {
+              $lookup: {
+                from: "products",
+                localField: "buyingProducts.product",
+                foreignField: "_id",
+                as: "_prod",
+              },
+            },
+            { $unwind: { path: "$_prod", preserveNullAndEmptyArrays: true } },
+            {
+              $addFields: {
+                _lineQty: { $ifNull: ["$buyingProducts.quantity", 0] },
+                _linePrice: { $ifNull: ["$buyingProducts.price", 0] },
+                _lineSubtotal: { $ifNull: ["$buyingProducts.subtotal", null] },
+              },
+            },
+            {
+              $addFields: {
+                _lineTotal: {
+                  $cond: [
+                    { $and: [ { $ne: ["$_lineSubtotal", null] }, { $not: { $gt: [ { $type: "$_lineSubtotal" }, "string" ] } } ] },
+                    "$_lineSubtotal",
+                    { $multiply: ["$_linePrice", "$_lineQty"] },
+                  ],
+                },
+              },
+            },
             {
               $group: {
                 _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
-                sales: { $sum: { $ifNull: ["$billingSummary.total", 0] } },
+                sales: { $sum: { $ifNull: ["$_lineTotal", 0] } },
               },
             },
             { $sort: { _id: 1 } },
