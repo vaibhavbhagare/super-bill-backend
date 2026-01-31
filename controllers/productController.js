@@ -10,9 +10,11 @@ exports.createProduct = async (req, res) => {
       const random = Math.floor(100 + Math.random() * 900);
       barcode = timestamp + random;
     }
-    // categories can be provided as categoryIds[] or legacy category name
+    // categories can be provided as categories[] or categoryIds[] or legacy category name
     let categories = [];
-    if (Array.isArray(req.body.categoryIds) && req.body.categoryIds.length) {
+    if (Array.isArray(req.body.categories) && req.body.categories.length) {
+      categories = req.body.categories;
+    } else if (Array.isArray(req.body.categoryIds) && req.body.categoryIds.length) {
       categories = req.body.categoryIds;
     }
 
@@ -63,7 +65,16 @@ exports.getProducts = async (req, res) => {
 
     // Search block
     if (search && String(search).trim()) {
-      const searchRegex = new RegExp(String(search).trim(), "i");
+      // Normalize search: remove spaces and create regex that allows optional spaces between characters
+      // This handles cases like "DairyMilk" matching "Dairy Milk" and "dairy milk" matching "Dairy Milk"
+      const searchTerm = String(search).trim();
+      // Escape special regex characters and allow optional spaces between characters
+      const escapedSearch = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      // Create pattern that allows optional whitespace between characters
+      // "DairyMilk" becomes "D\s*a\s*i\s*r\s*y\s*M\s*i\s*l\s*k" which matches "Dairy Milk"
+      const normalizedPattern = escapedSearch.split("").join("\\s*");
+      const searchRegex = new RegExp(normalizedPattern, "i");
+      
       andConditions.push({
         $or: [
           { name: { $regex: searchRegex } },
@@ -71,7 +82,7 @@ exports.getProducts = async (req, res) => {
             $expr: {
               $regexMatch: {
                 input: { $toString: "$secondName" },
-                regex: String(search),
+                regex: normalizedPattern,
                 options: "i",
               },
             },
@@ -80,7 +91,7 @@ exports.getProducts = async (req, res) => {
             $expr: {
               $regexMatch: {
                 input: { $toString: "$searchKey" },
-                regex: String(search),
+                regex: normalizedPattern,
                 options: "i",
               },
             },
@@ -191,12 +202,14 @@ exports.getProductByBarcode = async (req, res) => {
 // Update
 exports.updateProduct = async (req, res) => {
   try {
-    // Handle categories updates: accept categoryIds[] or legacy category string
+    // Handle categories updates: accept categories[] or categoryIds[] or legacy category string
     const updateData = {
       ...req.body,
       updatedBy: req.user.userName, // Use logged-in user's username
     };
-    if (Array.isArray(req.body.categoryIds)) {
+    if (Array.isArray(req.body.categories)) {
+      updateData.categories = req.body.categories;
+    } else if (Array.isArray(req.body.categoryIds)) {
       updateData.categories = req.body.categoryIds;
     }
 
