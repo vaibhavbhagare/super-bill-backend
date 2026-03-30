@@ -19,6 +19,49 @@ const REMOTE_URI = process.env.REMOTE_MONGO_URI;
 const localDbName = process.env.LOCAL_DB_NAME;
 const remoteDbName = process.env.REMOTE_DB_NAME; // Use your DB name
 
+// Maintain shared MongoDB clients so that if a connection does not exist
+// during a sync request, it can be (re)initialized lazily here.
+let localClient;
+let remoteClient;
+
+async function getDatabases() {
+  if (!LOCAL_URI || !REMOTE_URI || !localDbName || !remoteDbName) {
+    throw new Error("Database connection configuration is missing");
+  }
+
+  try {
+    // Lazily initiate clients if they don't exist yet
+    if (!localClient) {
+      localClient = await MongoClient.connect(LOCAL_URI);
+    }
+    if (!remoteClient) {
+      remoteClient = await MongoClient.connect(REMOTE_URI);
+    }
+  } catch (err) {
+    // Normalize connection-related errors into a clearer message for the API
+    if (err && (err.code === "ECONNREFUSED" || err.code === "ENOTFOUND")) {
+      throw new Error(
+        "Unable to connect to remote MongoDB. Please check internet connection and REMOTE_MONGO_URI.",
+      );
+    }
+    if (err && err.name === "MongoServerSelectionError") {
+      throw new Error(
+        "MongoDB server selection failed. Remote cluster may be unreachable or blocked.",
+      );
+    }
+    throw err;
+  }
+
+  const dbLocal = localClient.db(localDbName);
+  const dbRemote = remoteClient.db(remoteDbName);
+
+  if (!dbLocal || !dbRemote) {
+    throw new Error("Database connection could not be initialized");
+  }
+
+  return { dbLocal, dbRemote };
+}
+
 // Helper: get last sync time for a collection
 async function getLastSync(db, collection) {
   const meta = await db.collection("sync_meta").findOne({ collection });
@@ -78,13 +121,8 @@ function getNaturalKeyFilter(collectionName, doc) {
 
 // GET /api/sync/status
 exports.getSyncStatus = async (req, res) => {
-  let localClient, remoteClient;
   try {
-    localClient = await MongoClient.connect(LOCAL_URI);
-    remoteClient = await MongoClient.connect(REMOTE_URI);
-
-    const dbLocal = localClient.db(localDbName);
-    const dbRemote = remoteClient.db(remoteDbName);
+    const { dbLocal, dbRemote } = await getDatabases();
 
     const collections = await getUserCollections(dbLocal);
 
@@ -116,13 +154,9 @@ exports.getSyncStatus = async (req, res) => {
         lastSync: meta?.lastSync || null,
       });
     }
-
     res.json(result);
   } catch (err) {
     res.status(500).json({ message: err.message });
-  } finally {
-    if (localClient) await localClient.close();
-    if (remoteClient) await remoteClient.close();
   }
 };
 
@@ -130,13 +164,8 @@ exports.getSyncStatus = async (req, res) => {
 // Hard delete all documents that have a deletedAt flag
 exports.purgeDeletedRecords = async (req, res) => {
   const { collection } = req.body; // optional single collection
-  let localClient, remoteClient;
   try {
-    localClient = await MongoClient.connect(LOCAL_URI);
-    remoteClient = await MongoClient.connect(REMOTE_URI);
-
-    const dbLocal = localClient.db(localDbName);
-    const dbRemote = remoteClient.db(remoteDbName);
+    const { dbLocal, dbRemote } = await getDatabases();
 
     const collections = collection
       ? [collection]
@@ -163,26 +192,17 @@ exports.purgeDeletedRecords = async (req, res) => {
         });
       }
     }
-
     res.json(result);
   } catch (err) {
     res.status(500).json({ message: err.message });
-  } finally {
-    if (localClient) await localClient.close();
-    if (remoteClient) await remoteClient.close();
   }
 };
 
 // POST /api/sync
 exports.syncCollections = async (req, res) => {
   const { collection } = req.body;
-  let localClient, remoteClient;
   try {
-    localClient = await MongoClient.connect(LOCAL_URI);
-    remoteClient = await MongoClient.connect(REMOTE_URI);
-
-    const dbLocal = localClient.db(localDbName);
-    const dbRemote = remoteClient.db(remoteDbName);
+    const { dbLocal, dbRemote } = await getDatabases();
 
     // Get collections to sync
     let collections = [];
@@ -410,8 +430,5 @@ exports.syncCollections = async (req, res) => {
     res.json(results);
   } catch (err) {
     res.status(500).json({ message: err.message });
-  } finally {
-    if (localClient) await localClient.close();
-    if (remoteClient) await remoteClient.close();
   }
 };
