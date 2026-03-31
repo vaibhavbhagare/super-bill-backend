@@ -1,5 +1,6 @@
 const Product = require("../models/Product");
 const Category = require("../models/Category");
+const mongoose = require("mongoose");
 const { Parser } = require("json2csv");
 // Create
 exports.createProduct = async (req, res) => {
@@ -40,6 +41,7 @@ exports.getProducts = async (req, res) => {
     // Params
     const {
       search = "",
+      categoryId,
       hasImage,
       stockStatus,
       purchasePriceMin,
@@ -96,6 +98,30 @@ exports.getProducts = async (req, res) => {
           },
         ],
       });
+    }
+
+    // categoryId (optional)
+    // - categoryId=<ObjectId> => filter by category
+    // - categoryId=uncategorized|none => products with no categories
+    if (categoryId && String(categoryId).trim()) {
+      const raw = String(categoryId).trim();
+      const normalized = raw.toLowerCase();
+
+      if (normalized === "uncategorized" || normalized === "none") {
+        andConditions.push({
+          $or: [
+            { categories: { $exists: false } },
+            { categories: null },
+            { categories: { $size: 0 } },
+          ],
+        });
+      } else if (mongoose.Types.ObjectId.isValid(raw)) {
+        andConditions.push({ categories: new mongoose.Types.ObjectId(raw) });
+      } else {
+        return res.status(400).json({
+          error: "Invalid categoryId. Use a valid ObjectId or 'uncategorized'.",
+        });
+      }
     }
 
     // hasImage: YES|NO
