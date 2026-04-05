@@ -19,6 +19,49 @@ const REMOTE_URI = process.env.REMOTE_MONGO_URI;
 const localDbName = process.env.LOCAL_DB_NAME;
 const remoteDbName = process.env.REMOTE_DB_NAME; // Use your DB name
 
+// Maintain shared MongoDB clients so that if a connection does not exist
+// during a sync request, it can be (re)initialized lazily here.
+let localClient;
+let remoteClient;
+
+async function getDatabases() {
+  if (!LOCAL_URI || !REMOTE_URI || !localDbName || !remoteDbName) {
+    throw new Error("Database connection configuration is missing");
+  }
+
+  try {
+    // Lazily initiate clients if they don't exist yet
+    if (!localClient) {
+      localClient = await MongoClient.connect(LOCAL_URI);
+    }
+    if (!remoteClient) {
+      remoteClient = await MongoClient.connect(REMOTE_URI);
+    }
+  } catch (err) {
+    // Normalize connection-related errors into a clearer message for the API
+    if (err && (err.code === "ECONNREFUSED" || err.code === "ENOTFOUND")) {
+      throw new Error(
+        "Unable to connect to remote MongoDB. Please check internet connection and REMOTE_MONGO_URI.",
+      );
+    }
+    if (err && err.name === "MongoServerSelectionError") {
+      throw new Error(
+        "MongoDB server selection failed. Remote cluster may be unreachable or blocked.",
+      );
+    }
+    throw err;
+  }
+
+  const dbLocal = localClient.db(localDbName);
+  const dbRemote = remoteClient.db(remoteDbName);
+
+  if (!dbLocal || !dbRemote) {
+    throw new Error("Database connection could not be initialized");
+  }
+
+  return { dbLocal, dbRemote };
+}
+
 // Helper: get last sync time for a collection
 async function getLastSync(db, collection) {
   const meta = await db.collection("sync_meta").findOne({ collection });
@@ -76,15 +119,122 @@ function getNaturalKeyFilter(collectionName, doc) {
   return { _id: doc._id };
 }
 
+// Helper: build a stable natural key string for full reconciliation
+function buildNaturalKeyString(collectionName, doc) {
+  if (collectionName === "attendances") {
+    const dateVal = doc?.date ? new Date(doc.date) : null;
+    if (dateVal && !isNaN(dateVal.getTime())) {
+      const startOfDay = new Date(
+        dateVal.getFullYear(),
+        dateVal.getMonth(),
+        dateVal.getDate(),
+        0,
+        0,
+        0,
+        0,
+      );
+      return `${doc.user || ""}::${startOfDay.toISOString()}`;
+    }
+    return `${doc.user || ""}::${doc.date || ""}`;
+  }
+  if (collectionName === "productstats") {
+    return `product::${doc.product || ""}`;
+  }
+  return String(doc._id);
+}
+
+// Helper: full reconciliation for collections that rely heavily on natural keys
+async function fullSyncByNaturalKey(collectionName, dbLocal, dbRemote) {
+  const [localAll, remoteAll] = await Promise.all([
+    dbLocal.collection(collectionName).find({}).toArray(),
+    dbRemote.collection(collectionName).find({}).toArray(),
+  ]);
+
+  const toMap = (docs) => {
+    const map = new Map();
+    for (const doc of docs) {
+      const key = buildNaturalKeyString(collectionName, doc);
+      const existing = map.get(key);
+      if (!existing) {
+        map.set(key, doc);
+      } else {
+        const existingUpdated =
+          existing.updatedAt || existing.createdAt || new Date(0);
+        const docUpdated = doc.updatedAt || doc.createdAt || new Date(0);
+        if (new Date(docUpdated) > new Date(existingUpdated)) {
+          map.set(key, doc);
+        }
+      }
+    }
+    return map;
+  };
+
+  const localMap = toMap(localAll);
+  const remoteMap = toMap(remoteAll);
+
+  const allKeys = new Set([
+    ...Array.from(localMap.keys()),
+    ...Array.from(remoteMap.keys()),
+  ]);
+
+  for (const key of allKeys) {
+    const localDoc = localMap.get(key) || null;
+    const remoteDoc = remoteMap.get(key) || null;
+
+    let winner = localDoc || remoteDoc;
+    if (localDoc && remoteDoc) {
+      const localDeleted = !!(localDoc.deletedAt && localDoc.deletedAt !== null);
+      const remoteDeleted = !!(
+        remoteDoc.deletedAt && remoteDoc.deletedAt !== null
+      );
+
+      if (localDeleted || remoteDeleted) {
+        winner = localDeleted ? localDoc : remoteDoc;
+      } else {
+        const localUpdated = localDoc.updatedAt || localDoc.createdAt || new Date(0);
+        const remoteUpdated =
+          remoteDoc.updatedAt || remoteDoc.createdAt || new Date(0);
+        winner =
+          new Date(remoteUpdated) > new Date(localUpdated) ? remoteDoc : localDoc;
+      }
+    }
+
+    if (!winner) continue;
+
+    const naturalKeyFilter = getNaturalKeyFilter(collectionName, winner);
+    const { _id, ...docWithoutId } = winner;
+
+    await Promise.all([
+      dbLocal
+        .collection(collectionName)
+        .updateOne(naturalKeyFilter, { $set: docWithoutId }, { upsert: true }),
+      dbRemote
+        .collection(collectionName)
+        .updateOne(naturalKeyFilter, { $set: docWithoutId }, { upsert: true }),
+    ]);
+  }
+
+  const activeFilter = {
+    $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
+  };
+  const [localCount, remoteCount] = await Promise.all([
+    dbLocal.collection(collectionName).countDocuments(activeFilter),
+    dbRemote.collection(collectionName).countDocuments(activeFilter),
+  ]);
+
+  const now = new Date();
+  await Promise.all([
+    setLastSync(dbLocal, collectionName, now),
+    setLastSync(dbRemote, collectionName, now),
+  ]);
+
+  return { localCount, remoteCount, lastSync: now };
+}
+
 // GET /api/sync/status
 exports.getSyncStatus = async (req, res) => {
-  let localClient, remoteClient;
   try {
-    localClient = await MongoClient.connect(LOCAL_URI);
-    remoteClient = await MongoClient.connect(REMOTE_URI);
-
-    const dbLocal = localClient.db(localDbName);
-    const dbRemote = remoteClient.db(remoteDbName);
+    const { dbLocal, dbRemote } = await getDatabases();
 
     const collections = await getUserCollections(dbLocal);
 
@@ -116,13 +266,9 @@ exports.getSyncStatus = async (req, res) => {
         lastSync: meta?.lastSync || null,
       });
     }
-
     res.json(result);
   } catch (err) {
     res.status(500).json({ message: err.message });
-  } finally {
-    if (localClient) await localClient.close();
-    if (remoteClient) await remoteClient.close();
   }
 };
 
@@ -130,13 +276,8 @@ exports.getSyncStatus = async (req, res) => {
 // Hard delete all documents that have a deletedAt flag
 exports.purgeDeletedRecords = async (req, res) => {
   const { collection } = req.body; // optional single collection
-  let localClient, remoteClient;
   try {
-    localClient = await MongoClient.connect(LOCAL_URI);
-    remoteClient = await MongoClient.connect(REMOTE_URI);
-
-    const dbLocal = localClient.db(localDbName);
-    const dbRemote = remoteClient.db(remoteDbName);
+    const { dbLocal, dbRemote } = await getDatabases();
 
     const collections = collection
       ? [collection]
@@ -163,26 +304,17 @@ exports.purgeDeletedRecords = async (req, res) => {
         });
       }
     }
-
     res.json(result);
   } catch (err) {
     res.status(500).json({ message: err.message });
-  } finally {
-    if (localClient) await localClient.close();
-    if (remoteClient) await remoteClient.close();
   }
 };
 
 // POST /api/sync
 exports.syncCollections = async (req, res) => {
   const { collection } = req.body;
-  let localClient, remoteClient;
   try {
-    localClient = await MongoClient.connect(LOCAL_URI);
-    remoteClient = await MongoClient.connect(REMOTE_URI);
-
-    const dbLocal = localClient.db(localDbName);
-    const dbRemote = remoteClient.db(remoteDbName);
+    const { dbLocal, dbRemote } = await getDatabases();
 
     // Get collections to sync
     let collections = [];
@@ -195,6 +327,22 @@ exports.syncCollections = async (req, res) => {
     const results = [];
     for (const col of collections) {
       try {
+        // For attendances and productstats, do a stronger full reconciliation using natural keys.
+        if (["attendances", "productstats"].includes(col)) {
+          const { localCount, remoteCount, lastSync } = await fullSyncByNaturalKey(
+            col,
+            dbLocal,
+            dbRemote,
+          );
+          results.push({
+            collection: col,
+            localCount,
+            remoteCount,
+            lastSync,
+          });
+          continue;
+        }
+
         // 1. Get last sync time
         const lastSync = await getLastSync(dbLocal, col);
 
@@ -410,8 +558,5 @@ exports.syncCollections = async (req, res) => {
     res.json(results);
   } catch (err) {
     res.status(500).json({ message: err.message });
-  } finally {
-    if (localClient) await localClient.close();
-    if (remoteClient) await remoteClient.close();
   }
 };

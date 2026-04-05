@@ -1,8 +1,11 @@
 """FastAPI routes for AI recommendation service."""
-from fastapi import APIRouter, HTTPException, Query
-from typing import Optional, List
+import asyncio
 import logging
+from typing import List, Optional
 
+from fastapi import APIRouter, HTTPException, Query
+
+from models.gemini_enrichment import GeminiEnrichRequest, GeminiEnrichResponse
 from models.product import (
     ProductResponse,
     ProductRecommendation,
@@ -10,6 +13,7 @@ from models.product import (
     RandomProductRequest,
     SuggestRequest
 )
+from services.gemini_product_enrichment import run_gemini_enrichment
 from services.recommendation_engine import RecommendationEngine
 
 logger = logging.getLogger(__name__)
@@ -171,4 +175,60 @@ async def health_check():
         "service": "AI Recommendation Service",
         "model": "sentence-transformers/all-MiniLM-L6-v2"
     }
+
+
+@router.post("/products/enrich/gemini", response_model=GeminiEnrichResponse)
+async def enrich_products_with_gemini(request: GeminiEnrichRequest):
+    """
+    Use Gemini to set name, secondName (Marathi), searchKey, description (English),
+    secondaryDescription (Marathi), product `categories` (from DB category catalog), and
+    generateContentFromAI on products.
+
+    **Test one queued product:** `{"limit": 1}`
+
+    **Process up to N not-yet-AI products:** `{"limit": 2000}` (omit `limit` to use cap 2000 per call)
+
+    **One specific product by id:** `{"productId": "<mongo _id>"}` — add `"force": true` to re-run.
+
+    Response includes **`updatedProducts`**: each entry is the full product document after MongoDB update
+    (`_id` as string, nested ObjectIds/datetimes serialized for JSON).
+    """
+    try:
+        result = await asyncio.to_thread(
+            run_gemini_enrichment,
+            limit=request.limit,
+            product_id=request.productId,
+            force=request.force,
+        )
+        return GeminiEnrichResponse(**result)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post(
+    "/products/{product_id}/enrich/gemini",
+    response_model=GeminiEnrichResponse,
+)
+async def enrich_one_product_with_gemini(
+    product_id: str,
+    force: bool = Query(
+        False,
+        description="Re-run even if generateContentFromAI is already true.",
+    ),
+):
+    """
+    Enrich **one** product by MongoDB `_id` in the path (handy for admin UI).
+
+    Same logic as `POST /ai/products/enrich/gemini` with body `{"productId": "..."}`.
+    """
+    try:
+        result = await asyncio.to_thread(
+            run_gemini_enrichment,
+            limit=None,
+            product_id=product_id,
+            force=force,
+        )
+        return GeminiEnrichResponse(**result)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 

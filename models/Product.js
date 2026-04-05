@@ -16,6 +16,7 @@ const productSchema = new mongoose.Schema(
     
     // E-commerce specific fields (only the requested ones)
     description: { type: String },
+    secondaryDescription: { type: String },
     discountPercentage: { type: Number, default: 0 },
     isOnSale: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true, index: true },

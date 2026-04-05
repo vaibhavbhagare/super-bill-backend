@@ -15,6 +15,7 @@ class ProductBase(BaseModel):
     sellingPrice1: float = 0.0
     brand: Optional[str] = None
     description: Optional[str] = None
+    secondaryDescription: Optional[str] = None
     discountPercentage: float = 0.0
     isOnSale: bool = False
     hasImage: bool = False
