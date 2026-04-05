@@ -119,6 +119,118 @@ function getNaturalKeyFilter(collectionName, doc) {
   return { _id: doc._id };
 }
 
+// Helper: build a stable natural key string for full reconciliation
+function buildNaturalKeyString(collectionName, doc) {
+  if (collectionName === "attendances") {
+    const dateVal = doc?.date ? new Date(doc.date) : null;
+    if (dateVal && !isNaN(dateVal.getTime())) {
+      const startOfDay = new Date(
+        dateVal.getFullYear(),
+        dateVal.getMonth(),
+        dateVal.getDate(),
+        0,
+        0,
+        0,
+        0,
+      );
+      return `${doc.user || ""}::${startOfDay.toISOString()}`;
+    }
+    return `${doc.user || ""}::${doc.date || ""}`;
+  }
+  if (collectionName === "productstats") {
+    return `product::${doc.product || ""}`;
+  }
+  return String(doc._id);
+}
+
+// Helper: full reconciliation for collections that rely heavily on natural keys
+async function fullSyncByNaturalKey(collectionName, dbLocal, dbRemote) {
+  const [localAll, remoteAll] = await Promise.all([
+    dbLocal.collection(collectionName).find({}).toArray(),
+    dbRemote.collection(collectionName).find({}).toArray(),
+  ]);
+
+  const toMap = (docs) => {
+    const map = new Map();
+    for (const doc of docs) {
+      const key = buildNaturalKeyString(collectionName, doc);
+      const existing = map.get(key);
+      if (!existing) {
+        map.set(key, doc);
+      } else {
+        const existingUpdated =
+          existing.updatedAt || existing.createdAt || new Date(0);
+        const docUpdated = doc.updatedAt || doc.createdAt || new Date(0);
+        if (new Date(docUpdated) > new Date(existingUpdated)) {
+          map.set(key, doc);
+        }
+      }
+    }
+    return map;
+  };
+
+  const localMap = toMap(localAll);
+  const remoteMap = toMap(remoteAll);
+
+  const allKeys = new Set([
+    ...Array.from(localMap.keys()),
+    ...Array.from(remoteMap.keys()),
+  ]);
+
+  for (const key of allKeys) {
+    const localDoc = localMap.get(key) || null;
+    const remoteDoc = remoteMap.get(key) || null;
+
+    let winner = localDoc || remoteDoc;
+    if (localDoc && remoteDoc) {
+      const localDeleted = !!(localDoc.deletedAt && localDoc.deletedAt !== null);
+      const remoteDeleted = !!(
+        remoteDoc.deletedAt && remoteDoc.deletedAt !== null
+      );
+
+      if (localDeleted || remoteDeleted) {
+        winner = localDeleted ? localDoc : remoteDoc;
+      } else {
+        const localUpdated = localDoc.updatedAt || localDoc.createdAt || new Date(0);
+        const remoteUpdated =
+          remoteDoc.updatedAt || remoteDoc.createdAt || new Date(0);
+        winner =
+          new Date(remoteUpdated) > new Date(localUpdated) ? remoteDoc : localDoc;
+      }
+    }
+
+    if (!winner) continue;
+
+    const naturalKeyFilter = getNaturalKeyFilter(collectionName, winner);
+    const { _id, ...docWithoutId } = winner;
+
+    await Promise.all([
+      dbLocal
+        .collection(collectionName)
+        .updateOne(naturalKeyFilter, { $set: docWithoutId }, { upsert: true }),
+      dbRemote
+        .collection(collectionName)
+        .updateOne(naturalKeyFilter, { $set: docWithoutId }, { upsert: true }),
+    ]);
+  }
+
+  const activeFilter = {
+    $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
+  };
+  const [localCount, remoteCount] = await Promise.all([
+    dbLocal.collection(collectionName).countDocuments(activeFilter),
+    dbRemote.collection(collectionName).countDocuments(activeFilter),
+  ]);
+
+  const now = new Date();
+  await Promise.all([
+    setLastSync(dbLocal, collectionName, now),
+    setLastSync(dbRemote, collectionName, now),
+  ]);
+
+  return { localCount, remoteCount, lastSync: now };
+}
+
 // GET /api/sync/status
 exports.getSyncStatus = async (req, res) => {
   try {
@@ -215,6 +327,22 @@ exports.syncCollections = async (req, res) => {
     const results = [];
     for (const col of collections) {
       try {
+        // For attendances and productstats, do a stronger full reconciliation using natural keys.
+        if (["attendances", "productstats"].includes(col)) {
+          const { localCount, remoteCount, lastSync } = await fullSyncByNaturalKey(
+            col,
+            dbLocal,
+            dbRemote,
+          );
+          results.push({
+            collection: col,
+            localCount,
+            remoteCount,
+            lastSync,
+          });
+          continue;
+        }
+
         // 1. Get last sync time
         const lastSync = await getLastSync(dbLocal, col);
 
