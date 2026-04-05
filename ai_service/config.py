@@ -31,6 +31,11 @@ class Config:
     # Node.js API Configuration (optional - for API-based access)
     NODE_API_URL = os.getenv("NODE_API_URL") or "http://localhost:3000"
     
+    # Gemini (product enrichment — set GEMINI_API_KEY in .env)
+    GEMINI_API_KEY = (os.getenv("GEMINI_API_KEY") or "").strip()
+    # Use a current model id (gemini-1.5-flash returns 404 on v1beta for many keys/accounts).
+    GEMINI_MODEL = os.getenv("GEMINI_MODEL") or "gemini-2.5-flash"
+
     # AI/ML Configuration
     EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL") or "sentence-transformers/all-MiniLM-L6-v2"
     SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.3"))
