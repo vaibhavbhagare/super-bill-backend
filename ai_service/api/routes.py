@@ -181,7 +181,8 @@ async def health_check():
 async def enrich_products_with_gemini(request: GeminiEnrichRequest):
     """
     Use Gemini to set name, secondName (Marathi), searchKey, description (English),
-    secondaryDescription (Marathi), and generateContentFromAI on products.
+    secondaryDescription (Marathi), product `categories` (from DB category catalog), and
+    generateContentFromAI on products.
 
     **Test one queued product:** `{"limit": 1}`
 
