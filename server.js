@@ -73,6 +73,7 @@ const startServer = async () => {
     const ecommerceRoutes = require("./routes/ecommerceRoutes");
     const categoryRoutes = require("./routes/categoryRoutes");
     const expenseRoutes = require("./routes/expenseRoutes");
+    const aiProxyRoutes = require("./routes/aiProxyRoutes");
 
     // 🛒 Register routes
     app.use("/api/users", userRoutes);
@@ -87,6 +88,7 @@ const startServer = async () => {
     app.use("/api/salary", salaryRoutes);
     app.use("/api/ecomm", ecommerceRoutes);
     app.use("/api/categories", categoryRoutes);
+    app.use("/api/ai", aiProxyRoutes);
 
     // 🖼️ Image upload route (dev/local only)
     const isLocalOrDev = ["development", "local", "dev"].includes(process.env.NODE_ENV);
