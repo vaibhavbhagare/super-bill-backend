@@ -10,15 +10,26 @@ router.post("/logout", userController.logoutUser);
 // Protected routes (authentication required)
 router.use(auth); // Apply auth middleware to all routes below
 
+const requireAdminOrSuperAdmin = (req, res, next) => {
+  if (!req.user || !["admin", "super_admin"].includes(req.user.role)) {
+    return res.status(403).json({ error: "Admin only", code: "FORBIDDEN" });
+  }
+  next();
+};
+
 // User management routes
 router.get("/me", userController.getCurrentUser); // Get current user profile
-router.post("/", userController.createUser); // Create new user
-router.get("/", userController.getUsers); // Get all users
-router.get("/:id", userController.getUserById); // Get user by ID
-router.put("/:id", userController.updateUser); // Update user
-router.delete("/:id", userController.deleteUser); // Delete user
+router.post("/", requireAdminOrSuperAdmin, userController.createUser); // Create new user
+router.get("/", requireAdminOrSuperAdmin, userController.getUsers); // Get all users
+router.get("/:id", requireAdminOrSuperAdmin, userController.getUserById); // Get user by ID
+router.put("/:id", requireAdminOrSuperAdmin, userController.updateUser); // Update user
+router.delete("/:id", requireAdminOrSuperAdmin, userController.deleteUser); // Delete user
 
 // WhatsApp broadcast route
-router.post("/whatsapp-broadcast-diwali", userController.sendWhatsAppToAllUsers); // Send WhatsApp message to all users
+router.post(
+  "/whatsapp-broadcast-diwali",
+  requireAdminOrSuperAdmin,
+  userController.sendWhatsAppToAllUsers,
+); // Send WhatsApp message to all users
 
 module.exports = router;

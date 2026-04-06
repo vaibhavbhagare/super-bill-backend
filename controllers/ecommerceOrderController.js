@@ -223,7 +223,7 @@ exports.placeOrder = async (req, res) => {
 // ADMIN: update status and auto-invoice on COMPLETED
 exports.updateStatus = async (req, res) => {
   try {
-    if (!req.user || req.user.role !== "admin") {
+    if (!req.user || !["admin", "super_admin"].includes(req.user.role)) {
       return res.status(403).json({ success: false, error: "Admin only" });
     }
     const { id } = req.params;
@@ -358,7 +358,7 @@ exports.getOrder = async (req, res) => {
 
 exports.listOrders = async (req, res) => {
   try {
-    if (!req.user || req.user.role !== "admin") {
+    if (!req.user || !["admin", "super_admin"].includes(req.user.role)) {
       return res.status(403).json({ success: false, error: "Admin only" });
     }
     const {
