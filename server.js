@@ -22,7 +22,7 @@ app.use(
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
-  })
+  }),
 );
 
 // ⏱️ Apply rate limiting
@@ -42,9 +42,12 @@ const isDev =
   process.env.NODE_ENV === "local" ||
   process.env.NODE_ENV === "dev";
 
+// Only use these env vars:
+// - LOCAL_MONGO_URI (dev/local)
+// - REMOTE_MONGO_URI (live/prod)
 const mongoUri = isDev
-  ? process.env.LOCAL_MONGO_URI || process.env.MONGODB_URI
-  : process.env.MONGODB_URI || process.env.REMOTE_MONGO_URI;
+  ? process.env.LOCAL_MONGO_URI
+  : process.env.REMOTE_MONGO_URI;
 
 // Disable command buffering to catch early DB errors
 mongoose.set("bufferCommands", false);
@@ -52,13 +55,21 @@ mongoose.set("bufferCommands", false);
 // 🚀 Start the server after DB connection
 const startServer = async () => {
   try {
+    if (typeof mongoUri !== "string" || mongoUri.trim() === "") {
+      throw new Error(
+        `MongoDB URI env var is missing. Set ${
+          isDev ? "LOCAL_MONGO_URI" : "REMOTE_MONGO_URI"
+        }. Current NODE_ENV=${process.env.NODE_ENV || "(not set)"}`,
+      );
+    }
+
     await mongoose.connect(mongoUri, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
       serverSelectionTimeoutMS: 5000,
     });
 
-    console.log(`✅ Connected to MongoDB: ${mongoUri}`);
+    console.log("✅ Connected to MongoDB");
 
     // ✅ Import routes *after* DB connection is ready
     const userRoutes = require("./routes/userRoutes");
@@ -93,7 +104,9 @@ const startServer = async () => {
     app.use("/api/otp", otpValidationRoutes);
 
     // 🖼️ Image upload route (dev/local only)
-    const isLocalOrDev = ["development", "local", "dev"].includes(process.env.NODE_ENV);
+    const isLocalOrDev = ["development", "local", "dev"].includes(
+      process.env.NODE_ENV,
+    );
     if (isLocalOrDev) {
       const imageUpload = require("./routes/imageUpload");
       app.use("/api/images", imageUpload);
@@ -124,7 +137,9 @@ const startServer = async () => {
     // 🧠 Start listening
     const PORT = process.env.PORT || 3000;
     app.listen(PORT, () => {
-      console.log(`🚀 Server is running on port ${PORT}, env: ${process.env.NODE_ENV}`);
+      console.log(
+        `🚀 Server is running on port ${PORT}, env: ${process.env.NODE_ENV}`,
+      );
     });
   } catch (err) {
     console.error("❌ MongoDB connection error:", err.message);
