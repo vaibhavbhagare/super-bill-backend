@@ -200,17 +200,13 @@ function generateMarathiInvoiceParamsTwilio(invoice, customer, storeInfo) {
   return {
     1: storeName, // दुकानाचे नाव
     2: customerName, // ग्राहकाचे नाव
-    3: date, // दिनांक
-    4: billNo, // बिल क्रमांक
-    5: customerName, // खरेदी माहिती
-    6: sanitizeText(productLines), // एकूण रक्कम
-    7: `₹${total}`, // सवलत
-    8: `₹${discount}`, // देय रक्कम
-    9: `₹${subtotal}`, // देय रक्कम
-    10: paymentMethod, // पेमेंट प्रकार
-    11: address1, // पत्ता
-    12: address2, // मोबाईल क्रमांक
-    13: phone, // मोबाईल क्रमांक
+    3: billNo, // बिल क्रमांक
+    4: sanitizeText(productLines), // खरेदी माहिती
+    5: `₹${total}`, // एकूण रक्कम
+    6: `₹${discount}`, // सवलत
+    7: `*₹${subtotal}*`, // देय रक्कम
+    8: paymentMethod, // देय रक्कम
+    9: invoice.channel || "POS", // पेमेंट प्रकार
   };
 }
 
@@ -248,18 +244,13 @@ function generateMarathiInvoiceParamsTwilioShortInvoice(
   return {
     1: storeName, // दुकानाचे नाव
     2: customerName, // ग्राहकाचे नाव
-    3: date, // दिनांक
-    4: billNo, // बिल क्रमांक
-    5: sanitizeText(productLines), // खरेदी माहिती
-    6: `₹${total}`, // एकूण रक्कम
-    7: `₹${discount}`, // सवलत
-    8: `*₹${subtotal}*`, // देय रक्कम
-    9: paymentMethod, // देय रक्कम
-    10: invoice.channel || "POS", // पेमेंट प्रकार
-    11: `${address1} ${address2}`, // channel
-    12: phone, // मोबाईल क्रमांक //
-    13: `${storeInfo.onlineWebUrl}`, // मोबाईल क्रमांक //
-    14: `${storeInfo.instaUrl}`, // मोबाईल क्रमांक
+    3: billNo, // बिल क्रमांक
+    4: sanitizeText(productLines), // खरेदी माहिती
+    5: `₹${total}`, // एकूण रक्कम
+    6: `₹${discount}`, // सवलत
+    7: `*₹${subtotal}*`, // देय रक्कम
+    8: paymentMethod, // देय रक्कम
+    9: invoice.channel || "POS", // पेमेंट प्रकार
   };
 }
 function normalizePhoneNumber(input) {
