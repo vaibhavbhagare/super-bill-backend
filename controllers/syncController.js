@@ -310,249 +310,340 @@ exports.purgeDeletedRecords = async (req, res) => {
   }
 };
 
+// // POST /api/sync
+// exports.syncCollections = async (req, res) => {
+//   const { collection } = req.body;
+//   try {
+//     const { dbLocal, dbRemote } = await getDatabases();
+
+//     // Get collections to sync
+//     let collections = [];
+//     if (collection) {
+//       collections = [collection];
+//     } else {
+//       collections = await getUserCollections(dbLocal);
+//     }
+
+//     const results = [];
+//     for (const col of collections) {
+//       try {
+//         // For attendances and productstats, do a stronger full reconciliation using natural keys.
+//         if (["attendances", "productstats"].includes(col)) {
+//           const { localCount, remoteCount, lastSync } = await syncForMultipleLocals(
+//             col,
+//             dbLocal,
+//             dbRemote,
+//           );
+//           results.push({
+//             collection: col,
+//             localCount,
+//             remoteCount,
+//             lastSync,
+//           });
+//           continue;
+//         }
+
+//         // 1. Get last sync time
+//         const lastSync = await getLastSync(dbLocal, col);
+
+//         // 2. Get changes since last sync **and** any docs that are missing on the opposite side.
+//         //    This guarantees we also catch documents that existed *before* lastSync but failed to
+//         //    sync for some reason (the root cause of the empty change sets you observed).
+
+//         // Fetch just the _ids to build quick lookup sets (memory-efficient for typical collection sizes).
+//         const remoteIdsArr = await dbRemote.collection(col).distinct("_id");
+//         const localIdsArr = await dbLocal.collection(col).distinct("_id");
+
+//         // Local changes: updated recently OR completely absent on remote OR soft deleted
+//         const localChanges = await dbLocal
+//           .collection(col)
+//           .find({
+//             $or: [
+//               { updatedAt: { $gt: lastSync } },
+//               { _id: { $nin: remoteIdsArr } },
+//               { deletedAt: { $exists: true, $ne: null } }, // Include soft-deleted records
+//             ],
+//           })
+//           .toArray();
+
+//         // Remote changes: updated recently OR completely absent on local OR soft deleted
+//         const remoteChanges = await dbRemote
+//           .collection(col)
+//           .find({
+//             $or: [
+//               { updatedAt: { $gt: lastSync } },
+//               { _id: { $nin: localIdsArr } },
+//               { deletedAt: { $exists: true, $ne: null } }, // Include soft-deleted records
+//             ],
+//           })
+//           .toArray();
+
+//         // Additional step: Check for records that exist in both but have different deletion states
+//         const conflictResolution = [];
+//         for (const localDoc of localChanges) {
+//           if (localDoc.deletedAt && localDoc.deletedAt !== null) {
+//             // Local is soft deleted, check if remote exists and is not deleted
+//             const naturalKeyFilter = getNaturalKeyFilter(col, localDoc);
+//             const remoteDoc = await dbRemote.collection(col).findOne({
+//               ...naturalKeyFilter,
+//               $or: [
+//                 { deletedAt: { $exists: false } },
+//                 { deletedAt: null }
+//               ]
+//             });
+//             if (remoteDoc) {
+//               conflictResolution.push({
+//                 type: 'local_deleted_remote_exists',
+//                 localDoc,
+//                 remoteDoc
+//               });
+//             }
+//           }
+//         }
+
+//         for (const remoteDoc of remoteChanges) {
+//           if (remoteDoc.deletedAt && remoteDoc.deletedAt !== null) {
+//             // Remote is soft deleted, check if local exists and is not deleted
+//             const naturalKeyFilter = getNaturalKeyFilter(col, remoteDoc);
+//             const localDoc = await dbLocal.collection(col).findOne({
+//               ...naturalKeyFilter,
+//               $or: [
+//                 { deletedAt: { $exists: false } },
+//                 { deletedAt: null }
+//               ]
+//             });
+//             if (localDoc) {
+//               conflictResolution.push({
+//                 type: 'remote_deleted_local_exists',
+//                 localDoc,
+//                 remoteDoc
+//               });
+//             }
+//           }
+//         }
+
+//         // 3. Merge local changes to remote
+//         for (const doc of localChanges) {
+//           const naturalKeyFilter = getNaturalKeyFilter(col, doc);
+
+//           const remoteDoc = await dbRemote
+//             .collection(col)
+//             .findOne(naturalKeyFilter);
+
+//           const { _id, ...docWithoutId } = doc;
+//           const docUpdatedAt = doc.updatedAt ? new Date(doc.updatedAt) : null;
+//           const remoteUpdatedAt = remoteDoc?.updatedAt
+//             ? new Date(remoteDoc.updatedAt)
+//             : null;
+
+//           // Handle soft deletes - if local doc is soft deleted, soft delete remote too
+//           if (doc.deletedAt && doc.deletedAt !== null) {
+//             // Always soft delete remote if local is soft deleted, regardless of remote state
+//             await dbRemote
+//               .collection(col)
+//               .updateOne(naturalKeyFilter, { 
+//                 $set: { 
+//                   deletedAt: doc.deletedAt,
+//                   deletedBy: doc.deletedBy,
+//                   updatedAt: doc.updatedAt || new Date()
+//                 } 
+//               }, { upsert: true });
+//           } else if (!remoteDoc || (docUpdatedAt && (!remoteUpdatedAt || docUpdatedAt > remoteUpdatedAt))) {
+//             // Only update if not soft deleted and remote is not soft deleted
+//             if (!remoteDoc || !remoteDoc.deletedAt) {
+//               await dbRemote
+//                 .collection(col)
+//                 .updateOne(naturalKeyFilter, { $set: docWithoutId }, { upsert: true });
+//             }
+//           }
+//         }
+
+//         // 4. Merge remote changes to local
+//         for (const doc of remoteChanges) {
+//           const naturalKeyFilter = getNaturalKeyFilter(col, doc);
+
+//           const localDoc = await dbLocal
+//             .collection(col)
+//             .findOne(naturalKeyFilter);
+
+//           const { _id, ...docWithoutId } = doc;
+//           const docUpdatedAt = doc.updatedAt ? new Date(doc.updatedAt) : null;
+//           const localUpdatedAt = localDoc?.updatedAt
+//             ? new Date(localDoc.updatedAt)
+//             : null;
+
+//           // Handle soft deletes - if remote doc is soft deleted, soft delete local too
+//           if (doc.deletedAt && doc.deletedAt !== null) {
+//             // Always soft delete local if remote is soft deleted, regardless of local state
+//             await dbLocal
+//               .collection(col)
+//               .updateOne(naturalKeyFilter, { 
+//                 $set: { 
+//                   deletedAt: doc.deletedAt,
+//                   deletedBy: doc.deletedBy,
+//                   updatedAt: doc.updatedAt || new Date()
+//                 } 
+//               }, { upsert: true });
+//           } else if (!localDoc || (docUpdatedAt && (!localUpdatedAt || docUpdatedAt > localUpdatedAt))) {
+//             // Only update if not soft deleted and local is not soft deleted
+//             if (!localDoc || !localDoc.deletedAt) {
+//               await dbLocal
+//                 .collection(col)
+//                 .updateOne(naturalKeyFilter, { $set: docWithoutId }, { upsert: true });
+//             }
+//           }
+//         }
+
+//         // 5. Handle conflict resolution - ensure deleted records stay deleted
+//         for (const conflict of conflictResolution) {
+//           if (conflict.type === 'local_deleted_remote_exists') {
+//             // Local is deleted, remote exists - soft delete remote
+//             const naturalKeyFilter = getNaturalKeyFilter(col, conflict.localDoc);
+            
+//             await dbRemote.collection(col).updateOne(naturalKeyFilter, {
+//               $set: {
+//                 deletedAt: conflict.localDoc.deletedAt,
+//                 deletedBy: conflict.localDoc.deletedBy,
+//                 updatedAt: conflict.localDoc.updatedAt || new Date()
+//               }
+//             });
+//           } else if (conflict.type === 'remote_deleted_local_exists') {
+//             // Remote is deleted, local exists - soft delete local
+//             const naturalKeyFilter = getNaturalKeyFilter(col, conflict.remoteDoc);
+            
+//             await dbLocal.collection(col).updateOne(naturalKeyFilter, {
+//               $set: {
+//                 deletedAt: conflict.remoteDoc.deletedAt,
+//                 deletedBy: conflict.remoteDoc.deletedBy,
+//                 updatedAt: conflict.remoteDoc.updatedAt || new Date()
+//               }
+//             });
+//           }
+//         }
+
+//         // 6. Return updated counts *before* deciding whether to persist the new lastSync
+//         const activeFilter = {
+//           $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
+//         };
+//         const localCount = await dbLocal
+//           .collection(col)
+//           .countDocuments(activeFilter);
+//         const remoteCount = await dbRemote
+//           .collection(col)
+//           .countDocuments(activeFilter);
+
+//         // 7. Only advance the lastSync timestamp if the two collections are now in sync.
+//         //    This avoids skipping documents whose `updatedAt` precedes an erroneously
+//         //    recorded `lastSync` (the main reason `localChanges` / `remoteChanges` were empty).
+//         let now = null;
+//         if (localCount === remoteCount) {
+//           now = new Date();
+//           await setLastSync(dbLocal, col, now);
+//           await setLastSync(dbRemote, col, now);
+//         }
+
+//         results.push({
+//           collection: col,
+//           localCount,
+//           remoteCount,
+//           lastSync: now, // may be null if collections still differ
+//         });
+//       } catch (err) {
+//         results.push({
+//           collection: col,
+//           error: err.message,
+//         });
+//       }
+//     }
+//     res.json(results);
+//   } catch (err) {
+//     res.status(500).json({ message: err.message });
+//   }
+// };
+
+
 // POST /api/sync
 exports.syncCollections = async (req, res) => {
   const { collection } = req.body;
   try {
     const { dbLocal, dbRemote } = await getDatabases();
-
-    // Get collections to sync
-    let collections = [];
-    if (collection) {
-      collections = [collection];
-    } else {
-      collections = await getUserCollections(dbLocal);
-    }
-
+    let collections = collection ? [collection] : await getUserCollections(dbLocal);
     const results = [];
+
     for (const col of collections) {
       try {
-        // For attendances and productstats, do a stronger full reconciliation using natural keys.
-        if (["attendances", "productstats"].includes(col)) {
-          const { localCount, remoteCount, lastSync } = await fullSyncByNaturalKey(
-            col,
-            dbLocal,
-            dbRemote,
-          );
-          results.push({
-            collection: col,
-            localCount,
-            remoteCount,
-            lastSync,
-          });
-          continue;
-        }
-
-        // 1. Get last sync time
+        // 1. Get the last sync time for THIS specific local machine
         const lastSync = await getLastSync(dbLocal, col);
+        const now = new Date();
 
-        // 2. Get changes since last sync **and** any docs that are missing on the opposite side.
-        //    This guarantees we also catch documents that existed *before* lastSync but failed to
-        //    sync for some reason (the root cause of the empty change sets you observed).
+        // 2. PULL: Get everything from Production that changed since our last sync
+        const remoteChanges = await dbRemote.collection(col).find({
+          updatedAt: { $gt: lastSync }
+        }).toArray();
 
-        // Fetch just the _ids to build quick lookup sets (memory-efficient for typical collection sizes).
-        const remoteIdsArr = await dbRemote.collection(col).distinct("_id");
-        const localIdsArr = await dbLocal.collection(col).distinct("_id");
-
-        // Local changes: updated recently OR completely absent on remote OR soft deleted
-        const localChanges = await dbLocal
-          .collection(col)
-          .find({
-            $or: [
-              { updatedAt: { $gt: lastSync } },
-              { _id: { $nin: remoteIdsArr } },
-              { deletedAt: { $exists: true, $ne: null } }, // Include soft-deleted records
-            ],
-          })
-          .toArray();
-
-        // Remote changes: updated recently OR completely absent on local OR soft deleted
-        const remoteChanges = await dbRemote
-          .collection(col)
-          .find({
-            $or: [
-              { updatedAt: { $gt: lastSync } },
-              { _id: { $nin: localIdsArr } },
-              { deletedAt: { $exists: true, $ne: null } }, // Include soft-deleted records
-            ],
-          })
-          .toArray();
-
-        // Additional step: Check for records that exist in both but have different deletion states
-        const conflictResolution = [];
-        for (const localDoc of localChanges) {
-          if (localDoc.deletedAt && localDoc.deletedAt !== null) {
-            // Local is soft deleted, check if remote exists and is not deleted
-            const naturalKeyFilter = getNaturalKeyFilter(col, localDoc);
-            const remoteDoc = await dbRemote.collection(col).findOne({
-              ...naturalKeyFilter,
-              $or: [
-                { deletedAt: { $exists: false } },
-                { deletedAt: null }
-              ]
-            });
-            if (remoteDoc) {
-              conflictResolution.push({
-                type: 'local_deleted_remote_exists',
-                localDoc,
-                remoteDoc
-              });
-            }
-          }
-        }
-
+        // 3. MERGE REMOTE -> LOCAL
         for (const remoteDoc of remoteChanges) {
-          if (remoteDoc.deletedAt && remoteDoc.deletedAt !== null) {
-            // Remote is soft deleted, check if local exists and is not deleted
-            const naturalKeyFilter = getNaturalKeyFilter(col, remoteDoc);
-            const localDoc = await dbLocal.collection(col).findOne({
-              ...naturalKeyFilter,
-              $or: [
-                { deletedAt: { $exists: false } },
-                { deletedAt: null }
-              ]
-            });
-            if (localDoc) {
-              conflictResolution.push({
-                type: 'remote_deleted_local_exists',
-                localDoc,
-                remoteDoc
-              });
-            }
-          }
-        }
+          const filter = getNaturalKeyFilter(col, remoteDoc);
+          const localDoc = await dbLocal.collection(col).findOne(filter);
 
-        // 3. Merge local changes to remote
-        for (const doc of localChanges) {
-          const naturalKeyFilter = getNaturalKeyFilter(col, doc);
+          const { _id, ...remoteDataWithoutId } = remoteDoc;
 
-          const remoteDoc = await dbRemote
-            .collection(col)
-            .findOne(naturalKeyFilter);
-
-          const { _id, ...docWithoutId } = doc;
-          const docUpdatedAt = doc.updatedAt ? new Date(doc.updatedAt) : null;
-          const remoteUpdatedAt = remoteDoc?.updatedAt
-            ? new Date(remoteDoc.updatedAt)
-            : null;
-
-          // Handle soft deletes - if local doc is soft deleted, soft delete remote too
-          if (doc.deletedAt && doc.deletedAt !== null) {
-            // Always soft delete remote if local is soft deleted, regardless of remote state
-            await dbRemote
-              .collection(col)
-              .updateOne(naturalKeyFilter, { 
-                $set: { 
-                  deletedAt: doc.deletedAt,
-                  deletedBy: doc.deletedBy,
-                  updatedAt: doc.updatedAt || new Date()
-                } 
-              }, { upsert: true });
-          } else if (!remoteDoc || (docUpdatedAt && (!remoteUpdatedAt || docUpdatedAt > remoteUpdatedAt))) {
-            // Only update if not soft deleted and remote is not soft deleted
-            if (!remoteDoc || !remoteDoc.deletedAt) {
-              await dbRemote
-                .collection(col)
-                .updateOne(naturalKeyFilter, { $set: docWithoutId }, { upsert: true });
-            }
-          }
-        }
-
-        // 4. Merge remote changes to local
-        for (const doc of remoteChanges) {
-          const naturalKeyFilter = getNaturalKeyFilter(col, doc);
-
-          const localDoc = await dbLocal
-            .collection(col)
-            .findOne(naturalKeyFilter);
-
-          const { _id, ...docWithoutId } = doc;
-          const docUpdatedAt = doc.updatedAt ? new Date(doc.updatedAt) : null;
-          const localUpdatedAt = localDoc?.updatedAt
-            ? new Date(localDoc.updatedAt)
-            : null;
-
-          // Handle soft deletes - if remote doc is soft deleted, soft delete local too
-          if (doc.deletedAt && doc.deletedAt !== null) {
-            // Always soft delete local if remote is soft deleted, regardless of local state
-            await dbLocal
-              .collection(col)
-              .updateOne(naturalKeyFilter, { 
-                $set: { 
-                  deletedAt: doc.deletedAt,
-                  deletedBy: doc.deletedBy,
-                  updatedAt: doc.updatedAt || new Date()
-                } 
-              }, { upsert: true });
-          } else if (!localDoc || (docUpdatedAt && (!localUpdatedAt || docUpdatedAt > localUpdatedAt))) {
-            // Only update if not soft deleted and local is not soft deleted
+          // Priority 1: If Remote is soft-deleted, Local MUST be soft-deleted
+          if (remoteDoc.deletedAt) {
+            await dbLocal.collection(col).updateOne(filter, { 
+              $set: { deletedAt: remoteDoc.deletedAt, updatedAt: now } 
+            }, { upsert: true });
+          } 
+          // Priority 2: If Remote is newer and neither are deleted, update Local
+          else if (!localDoc || new Date(remoteDoc.updatedAt) > new Date(localDoc.updatedAt || 0)) {
+            // Only update if Local isn't already soft-deleted (prevents reviving)
             if (!localDoc || !localDoc.deletedAt) {
-              await dbLocal
-                .collection(col)
-                .updateOne(naturalKeyFilter, { $set: docWithoutId }, { upsert: true });
+              await dbLocal.collection(col).updateOne(filter, { $set: remoteDataWithoutId }, { upsert: true });
             }
           }
         }
 
-        // 5. Handle conflict resolution - ensure deleted records stay deleted
-        for (const conflict of conflictResolution) {
-          if (conflict.type === 'local_deleted_remote_exists') {
-            // Local is deleted, remote exists - soft delete remote
-            const naturalKeyFilter = getNaturalKeyFilter(col, conflict.localDoc);
-            
-            await dbRemote.collection(col).updateOne(naturalKeyFilter, {
-              $set: {
-                deletedAt: conflict.localDoc.deletedAt,
-                deletedBy: conflict.localDoc.deletedBy,
-                updatedAt: conflict.localDoc.updatedAt || new Date()
-              }
-            });
-          } else if (conflict.type === 'remote_deleted_local_exists') {
-            // Remote is deleted, local exists - soft delete local
-            const naturalKeyFilter = getNaturalKeyFilter(col, conflict.remoteDoc);
-            
-            await dbLocal.collection(col).updateOne(naturalKeyFilter, {
-              $set: {
-                deletedAt: conflict.remoteDoc.deletedAt,
-                deletedBy: conflict.remoteDoc.deletedBy,
-                updatedAt: conflict.remoteDoc.updatedAt || new Date()
-              }
-            });
+        // 4. PUSH: Get local changes (including new soft-deletes) to send to Production
+        const localChanges = await dbLocal.collection(col).find({
+          updatedAt: { $gt: lastSync }
+        }).toArray();
+
+        // 5. MERGE LOCAL -> REMOTE
+        for (const localDoc of localChanges) {
+          const filter = getNaturalKeyFilter(col, localDoc);
+          const remoteDoc = await dbRemote.collection(col).findOne(filter);
+
+          const { _id, ...localDataWithoutId } = localDoc;
+
+          // Priority 1: If Local is soft-deleted, Production MUST be soft-deleted
+          if (localDoc.deletedAt) {
+            await dbRemote.collection(col).updateOne(filter, { 
+              $set: { deletedAt: localDoc.deletedAt, updatedAt: now } 
+            }, { upsert: true });
+          } 
+          // Priority 2: Push update if Local is newer than Production
+          else if (!remoteDoc || new Date(localDoc.updatedAt) > new Date(remoteDoc.updatedAt || 0)) {
+             // Only update Production if Production isn't already marked deleted by someone else
+            if (!remoteDoc || !remoteDoc.deletedAt) {
+              await dbRemote.collection(col).updateOne(filter, { $set: localDataWithoutId }, { upsert: true });
+            }
           }
         }
 
-        // 6. Return updated counts *before* deciding whether to persist the new lastSync
-        const activeFilter = {
-          $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
-        };
-        const localCount = await dbLocal
-          .collection(col)
-          .countDocuments(activeFilter);
-        const remoteCount = await dbRemote
-          .collection(col)
-          .countDocuments(activeFilter);
+        // 6. Update local metadata only (Production doesn't need to store this)
+        await setLastSync(dbLocal, col, now);
 
-        // 7. Only advance the lastSync timestamp if the two collections are now in sync.
-        //    This avoids skipping documents whose `updatedAt` precedes an erroneously
-        //    recorded `lastSync` (the main reason `localChanges` / `remoteChanges` were empty).
-        let now = null;
-        if (localCount === remoteCount) {
-          now = new Date();
-          await setLastSync(dbLocal, col, now);
-          await setLastSync(dbRemote, col, now);
-        }
+        // 7. Get final counts for the response
+        const activeFilter = { $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }] };
+        const [localCount, remoteCount] = await Promise.all([
+          dbLocal.collection(col).countDocuments(activeFilter),
+          dbRemote.collection(col).countDocuments(activeFilter)
+        ]);
 
-        results.push({
-          collection: col,
-          localCount,
-          remoteCount,
-          lastSync: now, // may be null if collections still differ
-        });
+        results.push({ collection: col, localCount, remoteCount, lastSync: now });
+
       } catch (err) {
-        results.push({
-          collection: col,
-          error: err.message,
-        });
+        results.push({ collection: col, error: err.message });
       }
     }
     res.json(results);
@@ -560,3 +651,48 @@ exports.syncCollections = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+
+// Optimized Logic for Multiple Locals
+async function syncForMultipleLocals(col, dbLocal, dbRemote) {
+  console.log("syncForMultipleLocals")
+  const lastSync = await getLastSync(dbLocal, col);
+  
+  // 1. PULL: Get everything from Prod updated since WE last checked
+  const remoteChanges = await dbRemote.collection(col).find({
+    updatedAt: { $gt: lastSync }
+  }).toArray();
+
+  // 2. MERGE: Apply remote changes to Local first
+  for (const doc of remoteChanges) {
+    const filter = getNaturalKeyFilter(col, doc);
+    const localDoc = await dbLocal.collection(col).findOne(filter);
+    
+    // Only update local if remote is actually newer
+    if (!localDoc || new Date(doc.updatedAt) > new Date(localDoc.updatedAt)) {
+      const { _id, ...cleanDoc } = doc;
+      await dbLocal.collection(col).updateOne(filter, { $set: cleanDoc }, { upsert: true });
+    }
+  }
+
+  // 3. PUSH: Now take Local changes and push to Prod
+  const localChanges = await dbLocal.collection(col).find({
+    updatedAt: { $gt: lastSync }
+  }).toArray();
+
+  for (const doc of localChanges) {
+    const filter = getNaturalKeyFilter(col, doc);
+    const { _id, ...cleanDoc } = doc;
+    
+    // Use $max on updatedAt to prevent an older local sync from overwriting newer prod data
+    await dbRemote.collection(col).updateOne(
+      filter, 
+      { 
+        $set: cleanDoc,
+        $setOnInsert: { createdAt: new Date() } 
+      }, 
+      { upsert: true }
+    );
+  }
+  
+  await setLastSync(dbLocal, col, new Date());
+}
