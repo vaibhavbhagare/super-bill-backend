@@ -64,8 +64,6 @@ const startServer = async () => {
     }
 
     await mongoose.connect(mongoUri, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
       serverSelectionTimeoutMS: 5000,
     });
 
@@ -142,7 +140,7 @@ const startServer = async () => {
       );
     });
   } catch (err) {
-    console.error("❌ MongoDB connection error:", err.message);
+    console.error("❌ Startup error:", err.message);
     process.exit(1); // Stop app if DB fails
   }
 };

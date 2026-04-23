@@ -2,10 +2,20 @@ const Customer = require("../models/Customer");
 const CustomerOtp = require("../models/CustomerOtp");
 const jwt = require("jsonwebtoken");
 const twilio = require("twilio");
-const smsClient = new twilio(
-  process.env.TWILIO_ACCOUNT_SID,
-  process.env.TWILIO_AUTH_TOKEN
-);
+let smsClient = null;
+const getSmsClient = () => {
+  if (smsClient) return smsClient;
+  const sid = process.env.TWILIO_ACCOUNT_SID;
+  const token = process.env.TWILIO_AUTH_TOKEN;
+  if (!sid || !token || !String(sid).startsWith("AC")) return null;
+  try {
+    smsClient = twilio(sid, token);
+    return smsClient;
+  } catch (err) {
+    console.error("❌ Twilio init failed:", err.message);
+    return null;
+  }
+};
 
 const whatsappService = require("../controllers/whatsappService");
 // Create
@@ -294,23 +304,28 @@ exports.sendLoginOtp = async (req, res) => {
     });
 
     // Prefer WhatsApp via Twilio
-    const waFrom = process.env.TWILIO_WHATSAPP_FROM; // e.g., whatsapp:+1415xxxxxxx
-    const waTo = `whatsapp:+91${normalized}`;
-    if (waFrom) {
-      const contentSid = process.env.TWILIO_OTP_CONTENT_SID; // optional template SID
-      if (contentSid) {
-        await smsClient.messages.create({
-          from: waFrom,
-          to: waTo,
-          contentSid,
-          contentVariables: JSON.stringify({ 1: otp, 2: "5" }),
-        });
-      } else {
-        await smsClient.messages.create({
-          from: waFrom,
-          to: waTo,
-          body: `Your login OTP is ${otp}. It expires in 5 minutes.`,
-        });
+    const client = getSmsClient();
+    if (!client) {
+      console.warn("⚠️ Twilio not configured. Login OTP generated but not sent.");
+    } else {
+      const waFrom = process.env.TWILIO_WHATSAPP_FROM; // e.g., whatsapp:+1415xxxxxxx
+      const waTo = `whatsapp:+91${normalized}`;
+      if (waFrom) {
+        const contentSid = process.env.TWILIO_OTP_CONTENT_SID; // optional template SID
+        if (contentSid) {
+          await client.messages.create({
+            from: waFrom,
+            to: waTo,
+            contentSid,
+            contentVariables: JSON.stringify({ 1: otp, 2: "5" }),
+          });
+        } else {
+          await client.messages.create({
+            from: waFrom,
+            to: waTo,
+            body: `Your login OTP is ${otp}. It expires in 5 minutes.`,
+          });
+        }
       }
     }
     return res.json({ success: true, message: "OTP sent" });
