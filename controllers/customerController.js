@@ -88,13 +88,6 @@ exports.getCustomers = async (req, res) => {
   }
 };
 
-//  whatsappService.sendWhatsAppMessage(
-//         'Ketan Ligade',
-//         120,
-//         '+919960038085',
-//         'https://content.jdmagicbox.com/comp/solapur/u7/9999px217.x217.221207222759.g8u7/catalogue/bhagare-super-market-ankoli-solapur-general-stores-9o7ehqfh88.jpg'
-//       );
-//     res.json(customers);
 // Read one
 exports.getCustomerById = async (req, res) => {
   try {
@@ -277,7 +270,7 @@ const signCustomerToken = (customer) => {
       phoneNumber: customer.phoneNumber,
       type: "customer",
     },
-    process.env.JWT_SECRET || "bhagare_super_market",
+    process.env.JWT_SECRET || "electrobizz-app",
     { expiresIn: process.env.CUSTOMER_JWT_EXPIRES_IN || "15h" }
   );
 };

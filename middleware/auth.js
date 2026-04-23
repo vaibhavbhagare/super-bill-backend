@@ -38,7 +38,7 @@ const verifyToken = async (token) => {
 
     const decoded = jwt.verify(
       token,
-      process.env.JWT_SECRET || "bhagare_super_market",
+      process.env.JWT_SECRET || "electrobizz-app",
     );
     // If token indicates customer
     if (decoded.type === "customer" && decoded.customerId) {

@@ -14,7 +14,7 @@ const generateToken = (user) => {
       userName: user.userName,
       role: user.role || "user",
     },
-    process.env.JWT_SECRET || "bhagare_super_market",
+    process.env.JWT_SECRET || "electrobizz-app",
     {
       expiresIn: process.env.JWT_EXPIRES_IN || "15h",
     },
