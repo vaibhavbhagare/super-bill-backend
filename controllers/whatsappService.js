@@ -66,7 +66,7 @@ exports.sendWhatsAppMessageTwilioShortInvoice = async (invoice, customer) => {
     const message = await client.messages.create({
       from: sender, // ✅ Twilio WhatsApp sender (sandbox or approved number)
       to: `whatsapp:+91${customerPhoneReceiver}`, // ✅ Dynamic number (must include +91)
-      contentSid: process.env.TWILIO_CONTENT_SID_SHORT_INVOICE, // ✅ Your approved template SID
+      contentSid: process.env.TWILIO_CONTENT_SID, // ✅ Your approved template SID
       contentVariables: JSON.stringify(body), // ✅ Must be a JSON string
     });
 
