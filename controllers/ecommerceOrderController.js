@@ -2,6 +2,7 @@ const Order = require("../models/Order");
 const Product = require("../models/Product");
 const Customer = require("../models/Customer");
 const Invoice = require("../models/Invoice");
+const orderWhatsApp = require("../services/whatsappOrderNotificationService");
 
 // Helpers: generate a unique-ish online invoice number
 function generateOnlineInvoiceNumber() {
@@ -214,6 +215,8 @@ exports.placeOrder = async (req, res) => {
       createdBy: actorName,
     });
 
+    orderWhatsApp.scheduleOrderWhatsApp(() => orderWhatsApp.onOrderPlaced(order.toObject ? order.toObject() : order));
+
   res.json({ success: true, data: order });
   } catch (err) {
     res.status(500).json({ success: false, error: "Failed to place order", message: err.message });
@@ -227,7 +230,7 @@ exports.updateStatus = async (req, res) => {
       return res.status(403).json({ success: false, error: "Admin only" });
     }
     const { id } = req.params;
-    const { status: rawStatus, note } = req.body;
+    const { status: rawStatus, note, orderWhatsAppExtras } = req.body;
     // Normalize incoming statuses to canonical enum
     const normalize = (s) => String(s || "").trim().toUpperCase()
       .replace(/\s+/g, " ")
@@ -245,6 +248,8 @@ exports.updateStatus = async (req, res) => {
     }
     const order = await Order.findById(id).populate("items.product");
     if (!order) return res.status(404).json({ success: false, error: "Order not found" });
+
+    const previousStatus = order.status;
 
   order.status = status;
     order.updatedBy = req.user ? req.user.userName : order.updatedBy;
@@ -308,9 +313,51 @@ exports.updateStatus = async (req, res) => {
   order.tracking.push({ status, note, by: req.user ? req.user.userName : "system", at: new Date() });
     await order.save();
 
+    const orderPlain = order.toObject ? order.toObject() : order;
+    orderWhatsApp.scheduleOrderWhatsApp(() =>
+      orderWhatsApp.onOrderStatusUpdated(orderPlain, status, {
+        previousStatus,
+        orderWhatsAppExtras,
+        statusNote: note,
+      }),
+    );
+
     res.json({ success: true, data: order });
   } catch (err) {
     res.status(500).json({ success: false, error: "Failed to update status", message: err.message });
+  }
+};
+
+/** Admin: fire any order WhatsApp catalog event (delay, OTP, refund, ops SLA, etc.). */
+exports.dispatchWhatsAppOrderEvent = async (req, res) => {
+  try {
+    if (!req.user || !["admin", "super_admin"].includes(req.user.role)) {
+      return res.status(403).json({ success: false, error: "Admin only" });
+    }
+    const { id } = req.params;
+    const body = req.body || {};
+    const eventId = body.eventId || body.event;
+    if (!eventId || !orderWhatsApp.isValidOrderWhatsAppEventId(eventId)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid or missing eventId",
+        allowed: orderWhatsApp.ORDER_NOTIFICATION_EVENT_IDS,
+      });
+    }
+    const order = await Order.findById(id).populate("items.product");
+    if (!order) return res.status(404).json({ success: false, error: "Order not found" });
+
+    const meta = { ...body };
+    delete meta.eventId;
+    delete meta.event;
+
+    orderWhatsApp.scheduleOrderWhatsApp(() =>
+      orderWhatsApp.dispatchOrderNotification(eventId, order.toObject ? order.toObject() : order, meta),
+    );
+
+    return res.json({ success: true, queued: true, eventId });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: "Failed to queue WhatsApp", message: err.message });
   }
 };
 
@@ -335,6 +382,11 @@ exports.cancelOrder = async (req, res) => {
       if (prod) { prod.stock += item.quantity; await prod.save(); }
     }
     await order.save();
+
+    orderWhatsApp.scheduleOrderWhatsApp(() =>
+      orderWhatsApp.onOrderCancelled(order.toObject ? order.toObject() : order, { reason: order.cancelledReason }),
+    );
+
     res.json({ success: true, data: order });
   } catch (err) {
     res.status(500).json({ success: false, error: "Failed to cancel order", message: err.message });

@@ -90,6 +90,7 @@ router.get("/orders/by-customer/:customerId", optionalAuth, ecommerceOrderContro
 router.get("/orders/my", auth, ecommerceOrderController.listMyOrders);
 router.get("/orders/:id", auth, ecommerceOrderController.getOrder);
 router.post("/orders/:id/status", auth, ecommerceOrderController.updateStatus);
+router.post("/orders/:id/whatsapp-notify", auth, ecommerceOrderController.dispatchWhatsAppOrderEvent);
 router.post("/orders/:id/cancel", optionalAuth, ecommerceOrderController.cancelOrder);
 
 module.exports = router;

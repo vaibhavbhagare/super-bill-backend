@@ -5,7 +5,6 @@ const client = new twilio(
   process.env.TWILIO_ACCOUNT_SID,
   process.env.TWILIO_AUTH_TOKEN
 );
-const axios = require("axios");
 
 exports.sendWhatsAppMessageTwilio = async (invoice, customer) => {
   try {
@@ -108,65 +107,7 @@ function normalizeCustomerName(name) {
     .join(" ");
 }
 
-// Formats a date into dd/mm/YYYY HH:MM in Asia/Kolkata timezone
-function formatDateTimeIST(dateInput) {
-  const date = new Date(dateInput);
-  const formatter = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Asia/Kolkata",
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-  const parts = formatter.formatToParts(date);
-  const get = (type) => parts.find((p) => p.type === type)?.value || "";
-  return `${get("day")}/${get("month")}/${get("year")} ${get("hour")}:${get("minute")}`;
-}
-
-function generateMarathiInvoiceParams(invoice, customer) {
-  const date = new Date(invoice.createdAt).toLocaleDateString("hi-IN");
-  const billNo =
-    invoice.invoiceNumber || invoice._id.toString().slice(-6).toUpperCase();
-  const customerName = normalizeCustomerName(customer.fullName) || "ग्राहक";
-  // const productLength = invoice.buyingProducts.length;
-
-  const productLines = invoice.buyingProducts
-    .map((item) => {
-      const qtyUnit = item.quantity + (item.unit || " नग");
-      return `${item.secondName || item.name} (${qtyUnit}) - ₹${item.price}`;
-    })
-    .join(invoice.buyingProducts.length > 1 ? ", " : "");
-
-  const {
-    subtotal = 0,
-    discount = 0,
-    total = 0,
-  } = invoice.billingSummary || {};
-
-  const paymentMethod =
-    {
-      ONLINE: "GPay / PhonePe / कार्ड",
-      CASH: "रोख",
-      CREDIT: "उधार",
-    }[invoice.transactionType] || "निवडलेले नाही";
-
-  return [
-    { type: "text", text: date }, // {{1}} दिनांक
-    { type: "text", text: billNo }, // {{2}} बिल क्रमांक
-    { type: "text", text: customerName }, // {{3}} ग्राहक
-    { type: "text", text: sanitizeText(productLines) }, // {{4}} खरेदी माहिती
-    { type: "text", text: `₹${subtotal}` }, // {{5}} एकूण रक्कम
-    { type: "text", text: `₹${discount}` }, // {{6}} सवलत
-    { type: "text", text: `₹${total}` }, // {{7}} देय रक्कम
-    { type: "text", text: paymentMethod }, // {{8}} पेमेंट प्रकार
-    { type: "text", text: customerName }, // {{8}} पेमेंट प्रकार
-  ];
-}
-
 function generateMarathiInvoiceParamsTwilio(invoice, customer, storeInfo) {
-  const date = new Date(invoice.createdAt).toLocaleDateString("hi-IN");
   const billNo =
     invoice.invoiceNumber || invoice._id?.toString().slice(-6).toUpperCase();
   const customerName = normalizeCustomerName(customer?.fullName) || "ग्राहक";
@@ -193,10 +134,6 @@ function generateMarathiInvoiceParamsTwilio(invoice, customer, storeInfo) {
     }[invoice.transactionType] || "निवडलेले नाही";
 
   const storeName = storeInfo?.name || "भगरे सुपर मार्केट";
-  const address1 = storeInfo?.address1 || "";
-  const address2 = storeInfo?.address2 || "";
-  const phone = storeInfo?.phoneNumber || "9960038085";
-
   return {
     1: storeName, // दुकानाचे नाव
     2: customerName, // ग्राहकाचे नाव
@@ -215,7 +152,6 @@ function generateMarathiInvoiceParamsTwilioShortInvoice(
   customer,
   storeInfo
 ) {
-  const date = formatDateTimeIST(invoice.createdAt);
   const billNo =
     invoice.invoiceNumber || invoice._id?.toString().slice(-6).toUpperCase();
 
@@ -237,10 +173,6 @@ function generateMarathiInvoiceParamsTwilioShortInvoice(
     }[invoice.transactionType] || "निवडलेले नाही";
 
   const storeName = storeInfo?.name || "भगरे सुपर मार्केट";
-  const address1 = storeInfo?.address1 || "";
-  const address2 = storeInfo?.address2 || "";
-  const phone = storeInfo?.phoneNumber || "9960038085";
-
   return {
     1: storeName, // दुकानाचे नाव
     2: customerName, // ग्राहकाचे नाव
@@ -267,8 +199,10 @@ function normalizePhoneNumber(input) {
   return digits.length === 10 ? digits : null;
 }
 
+exports.normalizePhoneNumber = normalizePhoneNumber;
+
 // Send custom WhatsApp message using Twilio
-exports.sendCustomWhatsAppMessage = async (phoneNumber, message) => {
+exports.sendCustomWhatsAppMessage = async (phoneNumber, _message) => {
   try {
     const normalizedPhone = normalizePhoneNumber(phoneNumber);
     
