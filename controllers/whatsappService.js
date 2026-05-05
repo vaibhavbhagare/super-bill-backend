@@ -1,4 +1,5 @@
 const twilio = require("twilio");
+const Store = require("../models/store");
 // const accountSid = "ACa2ad0f31d5591b9d31b8cd89adcee15c";
 // const authToken = "cef767502681697a32a854062265b7b6";
 const client = new twilio(
@@ -8,13 +9,19 @@ const client = new twilio(
 
 exports.sendWhatsAppMessageTwilio = async (invoice, customer) => {
   try {
+    const activeStore = await Store.findOne({ "storeProfile.isActive": true })
+      .sort({ updatedAt: -1 })
+      .select("storeProfile website")
+      .lean();
+
     const storeInfo = {
-      name: "*भगरे सुपर मार्केट*",
-      address1: `अंकोली & `,
-      address2: `अंकोली-शेजबाभूळगाव चौक`,
-      phoneNumber: "9764384901",
+      name: activeStore?.storeProfile?.storeName || "*भगरे सुपर मार्केट*",
+      address1: activeStore?.storeProfile?.storeAddress || "",
+      address2: "",
+      phoneNumber: activeStore?.storeProfile?.storePhone || "9764384901",
       instaUrl: "https://tinyurl.com/bhagare-shop-insta",
-      onlineWebUrl: "https://tinyurl.com/shop-bhagare",
+      onlineWebUrl:
+        activeStore?.website || "https://tinyurl.com/shop-bhagare",
     };
     const customerPhoneReceiver = normalizePhoneNumber(customer.phoneNumber);
 

@@ -93,20 +93,12 @@ exports.getReport = async (req, res) => {
           lineAgg: [
             { $unwind: { path: "$buyingProducts", preserveNullAndEmptyArrays: true } },
             {
-              $lookup: {
-                from: "products",
-                localField: "buyingProducts.product",
-                foreignField: "_id",
-                as: "_prod",
-              },
-            },
-            { $unwind: { path: "$_prod", preserveNullAndEmptyArrays: true } },
-            {
               $addFields: {
                 _lineQty: { $ifNull: ["$buyingProducts.quantity", 0] },
                 _linePrice: { $ifNull: ["$buyingProducts.price", 0] },
                 _lineSubtotal: { $ifNull: ["$buyingProducts.subtotal", null] },
-                _purchasePrice: { $ifNull: ["$buyingProducts.purchasePrice", { $ifNull: ["$_prod.purchasePrice", 0] }] },
+                // Cost at time of sale only — never use Product.purchasePrice (current master).
+                _purchasePrice: { $ifNull: ["$buyingProducts.purchasePrice", 0] },
               },
             },
             {

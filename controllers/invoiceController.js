@@ -175,7 +175,10 @@ exports.getInvoiceById = async (req, res) => {
   try {
     const invoice = await Invoice.findById(req.params.id)
       .populate("customer")
-      .populate("buyingProducts.product");
+      .populate({
+        path: "buyingProducts.product",
+        select: "-purchasePrice",
+      });
     if (!invoice) return res.status(404).json({ error: "Invoice not found" });
     res.json(invoice);
   } catch (err) {
@@ -345,7 +348,10 @@ exports.getInvoices = async (req, res) => {
     // Remove customerName filter and related population logic
     let invoiceQuery = Invoice.find(filter)
       .populate("customer")
-      .populate("buyingProducts.product");
+      .populate({
+        path: "buyingProducts.product",
+        select: "-purchasePrice",
+      });
 
     // Apply sorting, skip and limit
     const sort = { createdAt: -1 }; // Sort by newest first
