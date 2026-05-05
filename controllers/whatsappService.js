@@ -7,22 +7,25 @@ const client = new twilio(
   process.env.TWILIO_AUTH_TOKEN
 );
 
+async function getStoreInfo() {
+  const activeStore = await Store.findOne({ "storeProfile.isActive": true })
+    .sort({ updatedAt: -1 })
+    .select("storeProfile website")
+    .lean();
+
+  return {
+    name: activeStore?.storeProfile?.storeName || "*भगरे सुपर मार्केट*",
+    address1: activeStore?.storeProfile?.storeAddress || "",
+    address2: "",
+    phoneNumber: activeStore?.storeProfile?.storePhone || "9764384901",
+    instaUrl: "https://tinyurl.com/bhagare-shop-insta",
+    onlineWebUrl: activeStore?.website || "https://tinyurl.com/shop-bhagare",
+  };
+}
+
 exports.sendWhatsAppMessageTwilio = async (invoice, customer) => {
   try {
-    const activeStore = await Store.findOne({ "storeProfile.isActive": true })
-      .sort({ updatedAt: -1 })
-      .select("storeProfile website")
-      .lean();
-
-    const storeInfo = {
-      name: activeStore?.storeProfile?.storeName || "*भगरे सुपर मार्केट*",
-      address1: activeStore?.storeProfile?.storeAddress || "",
-      address2: "",
-      phoneNumber: activeStore?.storeProfile?.storePhone || "9764384901",
-      instaUrl: "https://tinyurl.com/bhagare-shop-insta",
-      onlineWebUrl:
-        activeStore?.website || "https://tinyurl.com/shop-bhagare",
-    };
+    const storeInfo = await getStoreInfo();
     const customerPhoneReceiver = normalizePhoneNumber(customer.phoneNumber);
 
     if (!customerPhoneReceiver) {
@@ -50,14 +53,7 @@ exports.sendWhatsAppMessageTwilio = async (invoice, customer) => {
 
 exports.sendWhatsAppMessageTwilioShortInvoice = async (invoice, customer) => {
   try {
-    const storeInfo = {
-      name: "*भगरे सुपर मार्केट*",
-      address1: `अंकोली & `,
-      address2: `अंकोली-शेजबाभूळगाव चौक`,
-      phoneNumber: "9764384901",
-      instaUrl: "https://tinyurl.com/bhagare-shop-insta",
-      onlineWebUrl: "https://tinyurl.com/shop-bhagare",
-    };
+    const storeInfo = await getStoreInfo();
     const customerPhoneReceiver = normalizePhoneNumber(customer.phoneNumber);
 
     if (!customerPhoneReceiver) {
