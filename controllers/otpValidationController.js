@@ -93,7 +93,7 @@ exports.sendOtp = async (req, res) => {
         }
       } else {
         // Fallback to SMS
-        const smsFrom = process.env.TWILIO_PHONE_NUMBER;
+        const smsFrom = process.env.TWILIO_WHATSAPP_FROM;
         const smsTo = `+91${normalized}`;
         
         await client.messages.create({

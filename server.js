@@ -84,6 +84,7 @@ const startServer = async () => {
     const expenseRoutes = require("./routes/expenseRoutes");
     const aiProxyRoutes = require("./routes/aiProxyRoutes");
     const otpValidationRoutes = require("./routes/otpValidationRoutes");
+    const messageReminderRoutes = require("./routes/messageReminderRoutes");
 
     // 🛒 Register routes
     app.use("/api/users", userRoutes);
@@ -100,6 +101,7 @@ const startServer = async () => {
     app.use("/api/categories", categoryRoutes);
     app.use("/api/ai", aiProxyRoutes);
     app.use("/api/otp", otpValidationRoutes);
+    app.use("/api/message-reminders", messageReminderRoutes);
 
     // 🖼️ Image upload route (dev/local only)
     const isLocalOrDev = ["development", "local", "dev"].includes(
