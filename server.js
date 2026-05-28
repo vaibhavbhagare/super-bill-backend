@@ -7,6 +7,7 @@ const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
+const { seedSuperAdmin } = require("./services/seedSuperAdmin");
 
 // Initialize Express
 const app = express();
@@ -68,6 +69,16 @@ const startServer = async () => {
     });
 
     console.log("✅ Connected to MongoDB");
+
+    // 🌱 Seed initial super admin (first run / empty DB)
+    try {
+      const result = await seedSuperAdmin();
+      if (result?.created) {
+        console.log("✅ Seeded super_admin user");
+      }
+    } catch (e) {
+      console.error("⚠️ Super admin seed failed:", e?.message || e);
+    }
 
     // ✅ Import routes *after* DB connection is ready
     const userRoutes = require("./routes/userRoutes");
