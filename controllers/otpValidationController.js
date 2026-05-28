@@ -1,11 +1,20 @@
 const CustomerOtp = require("../models/CustomerOtp");
 const twilio = require("twilio");
 
-// Initialize Twilio client
-const smsClient = new twilio(
-  process.env.TWILIO_ACCOUNT_SID,
-  process.env.TWILIO_AUTH_TOKEN
-);
+let smsClient = null;
+const getSmsClient = () => {
+  if (smsClient) return smsClient;
+  const sid = process.env.TWILIO_ACCOUNT_SID;
+  const token = process.env.TWILIO_AUTH_TOKEN;
+  if (!sid || !token || !String(sid).startsWith("AC")) return null;
+  try {
+    smsClient = twilio(sid, token);
+    return smsClient;
+  } catch (err) {
+    console.error("❌ Twilio init failed:", err.message);
+    return null;
+  }
+};
 
 // Helper functions
 const generateOtp = () => Math.floor(100000 + Math.random() * 900000).toString();
@@ -58,6 +67,10 @@ exports.sendOtp = async (req, res) => {
 
     // Send OTP via SMS/WhatsApp
     try {
+      const client = getSmsClient();
+      if (!client) {
+        console.warn("⚠️ Twilio not configured. OTP generated but not sent.");
+      } else {
       // Try WhatsApp first if configured
       const waFrom = process.env.TWILIO_WHATSAPP_FROM;
       const waTo = `whatsapp:+91${normalized}`;
@@ -65,14 +78,14 @@ exports.sendOtp = async (req, res) => {
       if (waFrom) {
         const contentSid = process.env.TWILIO_OTP_CONTENT_SID;
         if (contentSid) {
-          await smsClient.messages.create({
+          await client.messages.create({
             from: waFrom,
             to: waTo,
             contentSid,
             contentVariables: JSON.stringify({ 1: otp, 2: "5" }),
           });
         } else {
-          await smsClient.messages.create({
+          await client.messages.create({
             from: waFrom,
             to: waTo,
             body: `Your verification OTP is ${otp}. It expires in 5 minutes.`,
@@ -80,14 +93,15 @@ exports.sendOtp = async (req, res) => {
         }
       } else {
         // Fallback to SMS
-        const smsFrom = process.env.TWILIO_PHONE_NUMBER;
+        const smsFrom = process.env.TWILIO_WHATSAPP_FROM;
         const smsTo = `+91${normalized}`;
         
-        await smsClient.messages.create({
+        await client.messages.create({
           from: smsFrom,
           to: smsTo,
           body: `Your verification OTP is ${otp}. It expires in 5 minutes.`,
         });
+      }
       }
     } catch (smsError) {
       console.error("SMS/WhatsApp sending error:", smsError);

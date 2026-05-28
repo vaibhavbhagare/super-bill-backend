@@ -41,8 +41,13 @@ const getTwilioClient = () => {
   if (twilioClient) return twilioClient;
   const sid = process.env.TWILIO_ACCOUNT_SID;
   const token = process.env.TWILIO_AUTH_TOKEN;
-  if (!sid || !token) return null;
-  twilioClient = twilio(sid, token);
+  if (!sid || !token || !String(sid).startsWith("AC")) return null;
+  try {
+    twilioClient = twilio(sid, token);
+  } catch (err) {
+    console.error("[order WhatsApp] Twilio init failed:", err.message);
+    return null;
+  }
   return twilioClient;
 };
 

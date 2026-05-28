@@ -2,10 +2,26 @@ const twilio = require("twilio");
 const Store = require("../models/store");
 // const accountSid = "ACa2ad0f31d5591b9d31b8cd89adcee15c";
 // const authToken = "cef767502681697a32a854062265b7b6";
-const client = new twilio(
-  process.env.TWILIO_ACCOUNT_SID,
-  process.env.TWILIO_AUTH_TOKEN
-);
+let client = null;
+
+const getTwilioClient = () => {
+  if (client) return client;
+
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+
+  if (!accountSid || !authToken || !String(accountSid).startsWith("AC")) {
+    return null;
+  }
+
+  try {
+    client = twilio(accountSid, authToken);
+    return client;
+  } catch (err) {
+    console.error("❌ Twilio init failed:", err.message);
+    return null;
+  }
+};
 
 async function getStoreInfo() {
   const activeStore = await Store.findOne({ "storeProfile.isActive": true })
@@ -25,6 +41,12 @@ async function getStoreInfo() {
 
 exports.sendWhatsAppMessageTwilio = async (invoice, customer) => {
   try {
+    const twilioClient = getTwilioClient();
+    if (!twilioClient) {
+      console.warn("⚠️ Twilio not configured. Skipping WhatsApp send.");
+      return;
+    }
+
     const storeInfo = await getStoreInfo();
     const customerPhoneReceiver = normalizePhoneNumber(customer.phoneNumber);
 
@@ -38,7 +60,7 @@ exports.sendWhatsAppMessageTwilio = async (invoice, customer) => {
       storeInfo
     );
     const sender = process.env.TWILIO_WHATSAPP_FROM;
-    const message = await client.messages.create({
+    const message = await twilioClient.messages.create({
       from: sender, // ✅ Twilio WhatsApp sender (sandbox or approved number)
       to: `whatsapp:+91${customerPhoneReceiver}`, // ✅ Dynamic number (must include +91)
       contentSid: process.env.TWILIO_CONTENT_SID, // ✅ Your approved template SID
@@ -53,6 +75,12 @@ exports.sendWhatsAppMessageTwilio = async (invoice, customer) => {
 
 exports.sendWhatsAppMessageTwilioShortInvoice = async (invoice, customer) => {
   try {
+    const twilioClient = getTwilioClient();
+    if (!twilioClient) {
+      console.warn("⚠️ Twilio not configured. Skipping WhatsApp send.");
+      return;
+    }
+
     const storeInfo = await getStoreInfo();
     const customerPhoneReceiver = normalizePhoneNumber(customer.phoneNumber);
 
@@ -66,7 +94,7 @@ exports.sendWhatsAppMessageTwilioShortInvoice = async (invoice, customer) => {
       storeInfo
     );
     const sender = process.env.TWILIO_WHATSAPP_FROM;
-    const message = await client.messages.create({
+    const message = await twilioClient.messages.create({
       from: sender, // ✅ Twilio WhatsApp sender (sandbox or approved number)
       to: `whatsapp:+91${customerPhoneReceiver}`, // ✅ Dynamic number (must include +91)
       contentSid: process.env.TWILIO_CONTENT_SID, // ✅ Your approved template SID
@@ -207,6 +235,11 @@ exports.normalizePhoneNumber = normalizePhoneNumber;
 // Send custom WhatsApp message using Twilio
 exports.sendCustomWhatsAppMessage = async (phoneNumber, _message) => {
   try {
+    const twilioClient = getTwilioClient();
+    if (!twilioClient) {
+      throw new Error("Twilio is not configured");
+    }
+
     const normalizedPhone = normalizePhoneNumber(phoneNumber);
     
     if (!normalizedPhone) {
@@ -214,7 +247,7 @@ exports.sendCustomWhatsAppMessage = async (phoneNumber, _message) => {
     }
 
     const sender = process.env.TWILIO_WHATSAPP_FROM;
-    const messageResponse = await client.messages.create({
+    const messageResponse = await twilioClient.messages.create({
       from: sender,
       to: `whatsapp:+91${normalizedPhone}`,
       contentSid: process.env.TWILIO_CONTENT_SID_DIWALI,
