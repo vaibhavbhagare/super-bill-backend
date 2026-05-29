@@ -87,6 +87,16 @@ const storeSchema = new mongoose.Schema(
     bankAccountNumber: { type: String, trim: true },
     ifscCode: { type: String, trim: true },
     upiId: { type: String, trim: true },
+
+    subscriptionTier: {
+      type: String,
+      enum: ["basic", "standard", "premium", "custom"],
+      default: "standard",
+    },
+    featureOverrides: {
+      type: Object,
+      default: {},
+    },
     
     // Soft delete fields
     deletedAt: { type: Date, default: null },

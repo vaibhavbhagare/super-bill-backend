@@ -293,6 +293,21 @@ exports.updateUser = async (req, res) => {
 // Delete user (protected route)
 exports.deleteUser = async (req, res) => {
   try {
+    const targetUser = await User.findById(req.params.id);
+    if (!targetUser) {
+      return res.status(404).json({
+        error: "User not found",
+        code: "NOT_FOUND",
+      });
+    }
+
+    if (targetUser.role === "super_admin") {
+      return res.status(403).json({
+        error: "Super admin user cannot be deleted",
+        code: "FORBIDDEN",
+      });
+    }
+
     const deleted = await User.softDelete(
       req.params.id,
       req.user?.userName || "system",

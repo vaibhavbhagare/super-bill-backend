@@ -250,3 +250,85 @@ exports.updateBarcodeSettings = async (req, res) => {
     });
   }
 };
+
+// ✅ Get store subscription
+exports.getStoreSubscription = async (req, res) => {
+  try {
+    const store = await Store.findOne({
+      _id: req.params.id,
+      $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
+    });
+
+    if (!store) {
+      return res.status(404).json({
+        success: false,
+        message: "Store not found",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        subscriptionTier: store.subscriptionTier || "standard",
+        featureOverrides: store.featureOverrides || {},
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch subscription",
+      error: error.message,
+    });
+  }
+};
+
+// ✅ Update store subscription (super_admin only)
+exports.updateStoreSubscription = async (req, res) => {
+  try {
+    const { subscriptionTier, featureOverrides } = req.body;
+
+    if (
+      subscriptionTier &&
+      !["basic", "standard", "premium", "custom"].includes(subscriptionTier)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid subscription tier",
+      });
+    }
+
+    const update = {};
+    if (subscriptionTier) update.subscriptionTier = subscriptionTier;
+    if (featureOverrides !== undefined) {
+      update.featureOverrides = featureOverrides;
+    }
+
+    const updatedStore = await Store.findByIdAndUpdate(req.params.id, update, {
+      new: true,
+      runValidators: true,
+    });
+
+    if (!updatedStore) {
+      return res.status(404).json({
+        success: false,
+        message: "Store not found",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Subscription updated successfully",
+      data: {
+        _id: updatedStore._id,
+        subscriptionTier: updatedStore.subscriptionTier,
+        featureOverrides: updatedStore.featureOverrides || {},
+      },
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: "Failed to update subscription",
+      error: error.message,
+    });
+  }
+};
