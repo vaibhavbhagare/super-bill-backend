@@ -12,6 +12,7 @@ const BILLER_ALLOWED = [
   Features.INVOICES_VIEW,
   Features.INVOICE_CREATE,
   Features.INVOICE_EDIT,
+  Features.INVOICE_WHATSAPP,
   Features.REPORTS_VIEW,
   Features.ORDERS_VIEW,
   Features.SYNC_APP,

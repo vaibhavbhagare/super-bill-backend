@@ -4,6 +4,8 @@ const Customer = require("../models/Customer");
 const ProductStats = require("../models/ProductStats");
 const Order = require("../models/Order");
 const whatsappService = require("./whatsappService");
+const { canAccess } = require("../access/accessControl");
+const { Features } = require("../access/features");
 
 // Create Invoice
 exports.createInvoice = async (req, res) => {
@@ -164,7 +166,19 @@ exports.createInvoice = async (req, res) => {
       if (!customerData) {
         return res.status(404).json({ error: "Customer not found" });
       }
-      if (sendWhatsappMessage && customerData.phoneNumber !== 9764384901) {
+      const canSendWhatsapp = canAccess(
+        {
+          role: req.user?.role,
+          subscriptionTier: req.store?.subscriptionTier,
+          featureOverrides: req.store?.featureOverrides,
+        },
+        Features.INVOICE_WHATSAPP,
+      );
+      if (
+        sendWhatsappMessage &&
+        canSendWhatsapp &&
+        customerData.phoneNumber !== 9764384901
+      ) {
         whatsappService.sendWhatsAppMessageTwilioShortInvoice(invoice, customerData);
       }
       res.status(201).json(invoice);

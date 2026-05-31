@@ -26,6 +26,7 @@ const PREMIUM = [
   Features.INVOICE_EDIT,
   Features.INVOICE_DELETE,
   Features.BILL_DISCOUNT,
+  Features.INVOICE_WHATSAPP,
   Features.REPORTS_EXPORT,
   Features.EXPENSES_MANAGE,
   Features.MESSAGE_REMINDER_VIEW,
