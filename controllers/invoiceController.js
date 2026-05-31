@@ -7,6 +7,30 @@ const whatsappService = require("./whatsappService");
 const { canAccess } = require("../access/accessControl");
 const { Features } = require("../access/features");
 
+const normalizeProductId = (ref) => {
+  if (ref == null) return null;
+  if (typeof ref === "object") {
+    if (ref._id != null) return String(ref._id);
+    if (ref.id != null) return String(ref.id);
+    if (typeof ref.toString === "function") {
+      const asString = ref.toString();
+      if (/^[a-f\d]{24}$/i.test(asString)) return asString;
+    }
+  }
+  const value = String(ref).trim();
+  if (!value || value === "[object Object]") return null;
+  return value;
+};
+
+/** Stock updates use updateOne; bump updatedAt so incremental sync picks them up. */
+async function adjustProductStock(productId, delta) {
+  if (!delta) return;
+  await Product.updateOne(
+    { _id: productId },
+    { $inc: { stock: delta }, $set: { updatedAt: new Date() } },
+  );
+}
+
 // Create Invoice
 exports.createInvoice = async (req, res) => {
   try {
@@ -99,9 +123,7 @@ exports.createInvoice = async (req, res) => {
 
       await Product.updateOne(
         { _id: product._id },
-        {
-          $set: { stock: newStock },
-        }
+        { $set: { stock: newStock, updatedAt: new Date() } },
       );
 
       // Add purchasePrice to the enriched product data
@@ -218,14 +240,148 @@ exports.getInvoiceById = async (req, res) => {
   }
 };
 
-// Update invoice (optional, not typical in POS)
+// Update invoice — adjust line items and sync product stock
 exports.updateInvoice = async (req, res) => {
   try {
-    const invoice = await Invoice.findByIdAndUpdate(req.params.id, req.body, {
-      new: true,
-    });
-    if (!invoice) return res.status(404).json({ error: "Invoice not found" });
-    res.json(invoice);
+    const invoiceId = req.params.id;
+    const {
+      buyingProducts,
+      billingSummary,
+      paymentStatus,
+      transactionType,
+      paidAmount: paidAmountInput,
+      updatedBy,
+    } = req.body;
+
+    const existing = await Invoice.findById(invoiceId);
+    if (!existing || existing.deletedAt) {
+      return res.status(404).json({ error: "Invoice not found" });
+    }
+
+    if (!Array.isArray(buyingProducts) || buyingProducts.length === 0) {
+      return res.status(400).json({ error: "At least one product is required" });
+    }
+
+    const oldQtyMap = new Map();
+    for (const item of existing.buyingProducts || []) {
+      const pid = normalizeProductId(item.product);
+      if (!pid) continue;
+      oldQtyMap.set(pid, (oldQtyMap.get(pid) || 0) + Number(item.quantity || 0));
+    }
+
+    const enrichedBuyingProducts = [];
+    const newQtyMap = new Map();
+
+    for (const item of buyingProducts) {
+      const productId = normalizeProductId(item.product ?? item._id);
+      if (!productId) {
+        return res.status(400).json({ error: "Each line item must include product id" });
+      }
+
+      const product = await Product.findById(productId);
+      if (!product) {
+        return res.status(404).json({ error: `Product not found: ${productId}` });
+      }
+
+      const qty = Number(item.quantity || 0);
+      if (qty <= 0) {
+        return res.status(400).json({ error: "Product quantity must be greater than 0" });
+      }
+
+      const price = Number(item.price ?? item.sellingPrice1 ?? 0);
+      const mrp = Number(item.mrp ?? product.mrp ?? 0);
+
+      enrichedBuyingProducts.push({
+        product: product._id,
+        name: item.name || product.name,
+        secondName: item.secondName || product.secondName || "",
+        quantity: qty,
+        price,
+        purchasePrice: Number(item.purchasePrice ?? product.purchasePrice ?? 0),
+        mrp,
+        discount: Math.max(0, mrp - price),
+        subtotal: qty * price,
+      });
+
+      newQtyMap.set(productId, (newQtyMap.get(productId) || 0) + qty);
+    }
+
+    const allProductIds = new Set([...oldQtyMap.keys(), ...newQtyMap.keys()]);
+    for (const pid of allProductIds) {
+      const oldQty = oldQtyMap.get(pid) || 0;
+      const newQty = newQtyMap.get(pid) || 0;
+      if (oldQty === newQty) continue;
+
+      const product = await Product.findById(pid);
+      if (!product) continue;
+
+      const currentStock = Number(product.stock || 0);
+      // Stock already deducted for oldQty on this invoice — treat as available when editing
+      const availableForEdit = currentStock + oldQty;
+
+      if (newQty > availableForEdit) {
+        const needed = newQty - availableForEdit;
+        return res.status(400).json({
+          error: `Insufficient stock for ${product.name}. Available: ${availableForEdit}, needed: ${needed}`,
+        });
+      }
+
+      await adjustProductStock(pid, oldQty - newQty);
+    }
+
+    const computedSubtotal = enrichedBuyingProducts.reduce(
+      (sum, item) => sum + Number(item.subtotal || 0),
+      0,
+    );
+    const computedTotal = enrichedBuyingProducts.reduce(
+      (sum, item) => sum + Number(item.mrp || 0) * Number(item.quantity || 0),
+      0,
+    );
+    const billTotal = Number(billingSummary?.subtotal ?? computedSubtotal);
+
+    const ps = paymentStatus || existing.paymentStatus;
+    let paidAmount = 0;
+    let unpaidAmount = 0;
+
+    if (ps === "PAID") {
+      paidAmount = billTotal;
+      unpaidAmount = 0;
+    } else {
+      paidAmount = Math.min(
+        Math.max(0, Number(paidAmountInput ?? existing.paidAmount ?? 0)),
+        billTotal,
+      );
+      unpaidAmount = billTotal - paidAmount;
+    }
+
+    existing.buyingProducts = enrichedBuyingProducts;
+    existing.billingSummary = {
+      total: Number(billingSummary?.total ?? computedTotal),
+      subtotal: billTotal,
+      discount: Number(
+        billingSummary?.discount ?? Math.max(0, computedTotal - billTotal),
+      ),
+      gst: Number(billingSummary?.gst ?? 0),
+    };
+    existing.paymentStatus = ps;
+    if (transactionType) existing.transactionType = transactionType;
+    existing.paidAmount = paidAmount;
+    existing.unpaidAmount = unpaidAmount;
+    existing.updatedBy = updatedBy || req.user?.userName || req.user?.id || "system";
+    // save() bumps updatedAt; set explicitly so sync always sees invoice edits
+    // (findByIdAndUpdate with req.body did not update timestamps)
+    existing.updatedAt = new Date();
+
+    await existing.save();
+
+    const updated = await Invoice.findById(existing._id)
+      .populate("customer")
+      .populate({
+        path: "buyingProducts.product",
+        select: "-purchasePrice",
+      });
+
+    res.json(updated);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

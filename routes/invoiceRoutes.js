@@ -17,7 +17,11 @@ router.post(
   invoiceController.sendWhatsAppByInvoiceNumber,
 );
 router.get("/:id", invoiceController.getInvoiceById);
-router.put("/:id", invoiceController.updateInvoice);
+router.put(
+  "/:id",
+  requireFeature(Features.INVOICE_EDIT),
+  invoiceController.updateInvoice,
+);
 router.delete("/:id", invoiceController.deleteInvoice);
 
 module.exports = router;
