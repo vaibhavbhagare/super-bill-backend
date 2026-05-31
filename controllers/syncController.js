@@ -572,76 +572,110 @@ exports.syncCollections = async (req, res) => {
 
     for (const col of collections) {
       try {
-        // 1. Get the last sync time for THIS specific local machine
+        if (["attendances", "productstats"].includes(col)) {
+          const { localCount, remoteCount, lastSync } =
+            await fullSyncByNaturalKey(col, dbLocal, dbRemote);
+          results.push({ collection: col, localCount, remoteCount, lastSync });
+          continue;
+        }
+
         const lastSync = await getLastSync(dbLocal, col);
         const now = new Date();
 
-        // 2. PULL: Get everything from Production that changed since our last sync
-        const remoteChanges = await dbRemote.collection(col).find({
-          updatedAt: { $gt: lastSync }
-        }).toArray();
+        const remoteIdsArr = await dbRemote.collection(col).distinct("_id");
+        const localIdsArr = await dbLocal.collection(col).distinct("_id");
 
-        // 3. MERGE REMOTE -> LOCAL
+        const remoteChanges = await dbRemote
+          .collection(col)
+          .find({
+            $or: [
+              { updatedAt: { $gt: lastSync } },
+              { _id: { $nin: localIdsArr } },
+              { deletedAt: { $exists: true, $ne: null } },
+            ],
+          })
+          .toArray();
+
         for (const remoteDoc of remoteChanges) {
           const filter = getNaturalKeyFilter(col, remoteDoc);
           const localDoc = await dbLocal.collection(col).findOne(filter);
-
           const { _id, ...remoteDataWithoutId } = remoteDoc;
 
-          // Priority 1: If Remote is soft-deleted, Local MUST be soft-deleted
           if (remoteDoc.deletedAt) {
-            await dbLocal.collection(col).updateOne(filter, { 
-              $set: { deletedAt: remoteDoc.deletedAt, updatedAt: now } 
-            }, { upsert: true });
-          } 
-          // Priority 2: If Remote is newer and neither are deleted, update Local
-          else if (!localDoc || new Date(remoteDoc.updatedAt) > new Date(localDoc.updatedAt || 0)) {
-            // Only update if Local isn't already soft-deleted (prevents reviving)
+            await dbLocal.collection(col).updateOne(
+              filter,
+              { $set: { deletedAt: remoteDoc.deletedAt, updatedAt: now } },
+              { upsert: true },
+            );
+          } else if (
+            !localDoc ||
+            new Date(remoteDoc.updatedAt || 0) >
+              new Date(localDoc.updatedAt || 0)
+          ) {
             if (!localDoc || !localDoc.deletedAt) {
-              await dbLocal.collection(col).updateOne(filter, { $set: remoteDataWithoutId }, { upsert: true });
+              await dbLocal
+                .collection(col)
+                .updateOne(filter, { $set: remoteDataWithoutId }, { upsert: true });
             }
           }
         }
 
-        // 4. PUSH: Get local changes (including new soft-deletes) to send to Production
-        const localChanges = await dbLocal.collection(col).find({
-          updatedAt: { $gt: lastSync }
-        }).toArray();
+        const localChanges = await dbLocal
+          .collection(col)
+          .find({
+            $or: [
+              { updatedAt: { $gt: lastSync } },
+              { _id: { $nin: remoteIdsArr } },
+              { deletedAt: { $exists: true, $ne: null } },
+            ],
+          })
+          .toArray();
 
-        // 5. MERGE LOCAL -> REMOTE
         for (const localDoc of localChanges) {
           const filter = getNaturalKeyFilter(col, localDoc);
           const remoteDoc = await dbRemote.collection(col).findOne(filter);
-
           const { _id, ...localDataWithoutId } = localDoc;
 
-          // Priority 1: If Local is soft-deleted, Production MUST be soft-deleted
           if (localDoc.deletedAt) {
-            await dbRemote.collection(col).updateOne(filter, { 
-              $set: { deletedAt: localDoc.deletedAt, updatedAt: now } 
-            }, { upsert: true });
-          } 
-          // Priority 2: Push update if Local is newer than Production
-          else if (!remoteDoc || new Date(localDoc.updatedAt) > new Date(remoteDoc.updatedAt || 0)) {
-             // Only update Production if Production isn't already marked deleted by someone else
+            await dbRemote.collection(col).updateOne(
+              filter,
+              { $set: { deletedAt: localDoc.deletedAt, updatedAt: now } },
+              { upsert: true },
+            );
+          } else if (
+            !remoteDoc ||
+            new Date(localDoc.updatedAt || 0) >
+              new Date(remoteDoc.updatedAt || 0)
+          ) {
             if (!remoteDoc || !remoteDoc.deletedAt) {
-              await dbRemote.collection(col).updateOne(filter, { $set: localDataWithoutId }, { upsert: true });
+              await dbRemote
+                .collection(col)
+                .updateOne(filter, { $set: localDataWithoutId }, { upsert: true });
             }
           }
         }
 
-        // 6. Update local metadata only (Production doesn't need to store this)
-        await setLastSync(dbLocal, col, now);
-
-        // 7. Get final counts for the response
-        const activeFilter = { $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }] };
+        const activeFilter = {
+          $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
+        };
         const [localCount, remoteCount] = await Promise.all([
           dbLocal.collection(col).countDocuments(activeFilter),
-          dbRemote.collection(col).countDocuments(activeFilter)
+          dbRemote.collection(col).countDocuments(activeFilter),
         ]);
 
-        results.push({ collection: col, localCount, remoteCount, lastSync: now });
+        let syncedAt = null;
+        if (localCount === remoteCount) {
+          syncedAt = now;
+          await setLastSync(dbLocal, col, syncedAt);
+        }
 
+        results.push({
+          collection: col,
+          localCount,
+          remoteCount,
+          lastSync: syncedAt,
+          inSync: localCount === remoteCount,
+        });
       } catch (err) {
         results.push({ collection: col, error: err.message });
       }

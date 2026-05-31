@@ -17,10 +17,26 @@ exports.createInvoice = async (req, res) => {
       sendWhatsappMessage,
       transactionType,
       paymentStatus,
+      paidAmount: paidAmountInput,
       channel = "POS",
       createdBy,
       updatedBy,
     } = req.body;
+
+    const billTotal = Number(billingSummary?.subtotal ?? 0);
+    let paidAmount = 0;
+    let unpaidAmount = 0;
+
+    if (paymentStatus === "PAID") {
+      paidAmount = billTotal;
+      unpaidAmount = 0;
+    } else {
+      paidAmount = Math.min(
+        Math.max(0, Number(paidAmountInput ?? 0)),
+        billTotal,
+      );
+      unpaidAmount = billTotal - paidAmount;
+    }
 
     // Generate invoice number: MON-INV-XXXX (e.g., JUL-INV-0023)
     const monthNames = [
@@ -106,6 +122,8 @@ exports.createInvoice = async (req, res) => {
         transactionType,
         invoiceNumber,
         paymentStatus,
+        paidAmount,
+        unpaidAmount,
         channel,
         createdBy,
         updatedBy,

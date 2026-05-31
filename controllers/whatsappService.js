@@ -138,6 +138,40 @@ function normalizeCustomerName(name) {
     .join(" ");
 }
 
+function formatInvoicePaymentWhatsApp(invoice) {
+  const subtotal = Number(invoice.billingSummary?.subtotal ?? 0);
+  const paidAmount = Number(
+    invoice.paidAmount ??
+      (invoice.paymentStatus === "PAID" ? subtotal : 0),
+  );
+  const unpaidAmount = Number(
+    invoice.unpaidAmount ??
+      (invoice.paymentStatus === "PAID" ? 0 : subtotal - paidAmount),
+  );
+
+  const paymentMethod =
+    {
+      ONLINE: "GPay / PhonePe / कार्ड",
+      CASH: "रोख",
+      CREDIT: "उधार",
+    }[invoice.transactionType] || "निवडलेले नाही";
+
+  if (invoice.paymentStatus === "UNPAID") {
+    const statusLabel = "देय बाकी (UNPAID)";
+    if (paidAmount > 0 && unpaidAmount > 0) {
+      return sanitizeText(
+        `${paymentMethod} | ${statusLabel} | दिले: ₹${paidAmount} | बाकी: ₹${unpaidAmount}`,
+      );
+    }
+    if (paidAmount > 0 && unpaidAmount <= 0) {
+      return sanitizeText(`${paymentMethod} | भरले (PAID) | ₹${paidAmount}`);
+    }
+    return sanitizeText(`${paymentMethod} | ${statusLabel} | बाकी ₹${unpaidAmount}`);
+  }
+
+  return sanitizeText(`${paymentMethod} | भरले (PAID) | ₹${paidAmount || subtotal}`);
+}
+
 function generateMarathiInvoiceParamsTwilio(invoice, customer, storeInfo) {
   const billNo =
     invoice.invoiceNumber || invoice._id?.toString().slice(-6).toUpperCase();
@@ -157,13 +191,6 @@ function generateMarathiInvoiceParamsTwilio(invoice, customer, storeInfo) {
     total = 0,
   } = invoice.billingSummary || {};
 
-  const paymentMethod =
-    {
-      ONLINE: "GPay / PhonePe / कार्ड",
-      CASH: "रोख",
-      CREDIT: "उधार",
-    }[invoice.transactionType] || "निवडलेले नाही";
-
   const storeName = storeInfo?.name || "भगरे सुपर मार्केट";
   return {
     1: storeName, // दुकानाचे नाव
@@ -173,7 +200,7 @@ function generateMarathiInvoiceParamsTwilio(invoice, customer, storeInfo) {
     5: `₹${total}`, // एकूण रक्कम
     6: `₹${discount}`, // सवलत
     7: `*₹${subtotal}*`, // देय रक्कम
-    8: paymentMethod, // देय रक्कम
+    8: formatInvoicePaymentWhatsApp(invoice), // पेमेंट स्थिती + दिले/बाकी
     9: invoice.channel || "POS", // पेमेंट प्रकार
   };
 }
@@ -196,13 +223,6 @@ function generateMarathiInvoiceParamsTwilioShortInvoice(
     total = 0,
   } = invoice.billingSummary || {};
 
-  const paymentMethod =
-    {
-      ONLINE: "GPay / PhonePe / कार्ड",
-      CASH: "रोख",
-      CREDIT: "उधार",
-    }[invoice.transactionType] || "निवडलेले नाही";
-
   const storeName = storeInfo?.name || "भगरे सुपर मार्केट";
   return {
     1: storeName, // दुकानाचे नाव
@@ -212,7 +232,7 @@ function generateMarathiInvoiceParamsTwilioShortInvoice(
     5: `₹${total}`, // एकूण रक्कम
     6: `₹${discount}`, // सवलत
     7: `*₹${subtotal}*`, // देय रक्कम
-    8: paymentMethod, // देय रक्कम
+    8: formatInvoicePaymentWhatsApp(invoice), // पेमेंट स्थिती + दिले/बाकी
     9: invoice.channel || "POS", // पेमेंट प्रकार
   };
 }

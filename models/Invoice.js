@@ -43,7 +43,9 @@ const invoiceSchema = new mongoose.Schema(
       type: String,
       enum: ["PAID", "UNPAID"],
       default: "PAID",
-    }, // optional
+    },
+    paidAmount: { type: Number, default: 0, min: 0 },
+    unpaidAmount: { type: Number, default: 0, min: 0 },
     channel: {
       type: String,
       enum: ["POS", "ONLINE"],
