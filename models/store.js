@@ -97,6 +97,9 @@ const storeSchema = new mongoose.Schema(
       type: Object,
       default: {},
     },
+
+    /** Default low-stock alert level when product.minStock is not set */
+    defaultMinStock: { type: Number, min: 0, default: 5 },
     
     // Soft delete fields
     deletedAt: { type: Date, default: null },

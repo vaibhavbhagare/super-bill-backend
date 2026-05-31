@@ -2,8 +2,12 @@ const Invoice = require("../models/Invoice");
 const Product = require("../models/Product");
 const Expense = require("../models/Expense");
 const mongoose = require("mongoose");
+const {
+  getStoreDefaultMinStock,
+  lowStockFindMatch,
+  lowStockExprMatch,
+} = require("../services/minStockHelper");
 
-const LOW_STOCK_THRESHOLD_DEFAULT = 5;
 const LOW_STOCK_LIMIT = 100;
 
 /** UTC YYYY-MM-DD series matching Mongo $dateToString (UTC) on invoice dates */
@@ -32,10 +36,7 @@ exports.getReport = async (req, res) => {
       lowStock: lowStockParam,
     } = req.query;
 
-    const lowStockParsed = parseInt(lowStockParam ?? String(LOW_STOCK_THRESHOLD_DEFAULT), 10);
-    const lowStockThreshold = Number.isFinite(lowStockParsed)
-      ? Math.min(Math.max(lowStockParsed, 0), 999999)
-      : LOW_STOCK_THRESHOLD_DEFAULT;
+    const storeDefaultMinStock = await getStoreDefaultMinStock();
 
     const today = new Date();
     const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
@@ -280,14 +281,11 @@ exports.getReport = async (req, res) => {
 
     const [expenseResult] = await Expense.aggregate(expensePipeline).allowDiskUse(true);
 
-    const lowStockMatch = {
-      deletedAt: null,
-      stock: { $lte: lowStockThreshold },
-    };
+    const lowStockMatch = lowStockFindMatch(storeDefaultMinStock);
     if (billerId) lowStockMatch.createdBy = billerId;
 
     const lowStockRows = await Product.find(lowStockMatch)
-      .select("name barcode stock")
+      .select("name barcode stock minStock")
       .sort({ stock: 1 })
       .limit(LOW_STOCK_LIMIT)
       .lean();
@@ -295,6 +293,9 @@ exports.getReport = async (req, res) => {
     const lowStock = lowStockRows.map((p) => ({
       product: `${p.barcode} / ${p.name}`,
       stock: p.stock,
+      minStock: p.minStock ?? null,
+      effectiveMinStock:
+        p.minStock != null ? p.minStock : storeDefaultMinStock,
     }));
 
     const salesTrend = fillSalesTrendUtc(start, end, invoiceResult?.salesTrend || []);
@@ -307,6 +308,10 @@ exports.getReport = async (req, res) => {
       salesTrend,
       categorySales: invoiceResult?.categorySales || [],
       lowStock,
+      lowStockMeta: {
+        storeDefaultMinStock,
+        rule: "Alert when stock <= (product.minStock ?? store.defaultMinStock)",
+      },
     });
   } catch (error) {
     console.error("Error generating report:", error);
@@ -327,7 +332,9 @@ const daysAgo = (days) => {
 
 exports.getProductStatsReport = async (req, res) => {
   try {
-    let { startDate, endDate, transactionType, limit, lowStock, notSoldDays } = req.query;
+    let { startDate, endDate, transactionType, limit, notSoldDays } = req.query;
+
+    const storeDefaultMinStock = await getStoreDefaultMinStock();
 
     const today = new Date();
     const start = startDate
@@ -343,8 +350,6 @@ exports.getProductStatsReport = async (req, res) => {
     const useChannelBreakdown = Boolean(tx);
 
     const topLimit = Math.min(Math.max(parseInt(limit || "30", 30), 1), 100);
-    const lowStockParsed = parseInt(lowStock || String(LOW_STOCK_THRESHOLD_DEFAULT), 10);
-    const lowStockThreshold = Number.isFinite(lowStockParsed) ? lowStockParsed : LOW_STOCK_THRESHOLD_DEFAULT;
     const notSellingParsed = parseInt(notSoldDays || String(NOT_SOLD_DAYS_DEFAULT), 10);
     const notSellingDays = Number.isFinite(notSellingParsed) ? notSellingParsed : NOT_SOLD_DAYS_DEFAULT;
     const staleBefore = daysAgo(notSellingDays);
@@ -453,6 +458,7 @@ exports.getProductStatsReport = async (req, res) => {
             name: "$name",
             secondName: "$secondName",
             stock: "$stock",
+            minStock: "$minStock",
             expiryDate: "$expiryDate",
           },
           lastSoldAt: "$_st.lastSoldAt",
@@ -473,13 +479,17 @@ exports.getProductStatsReport = async (req, res) => {
             },
           ],
           lowStockProducts: [
-            { $match: { "_prod.stock": { $lte: lowStockThreshold } } },
+            { $match: lowStockExprMatch(storeDefaultMinStock) },
             {
               $project: {
                 productId: "$product",
                 name: "$_prod.name",
                 secondName: "$_prod.secondName",
                 stock: "$_prod.stock",
+                minStock: "$minStock",
+                effectiveMinStock: {
+                  $ifNull: ["$minStock", storeDefaultMinStock],
+                },
               },
             },
           ],
@@ -556,6 +566,10 @@ exports.getProductStatsReport = async (req, res) => {
       topProducts: invoiceFacet?.topProducts || [],
       expiredProducts: result?.expiredProducts || [],
       lowStockProducts: result?.lowStockProducts || [],
+      lowStockMeta: {
+        storeDefaultMinStock,
+        rule: "Alert when stock <= (product.minStock ?? store.defaultMinStock)",
+      },
       notSellingMeta: {
         thresholdDays: notSellingDays,
         staleBefore: staleBefore.toISOString(),

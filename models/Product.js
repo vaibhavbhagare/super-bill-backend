@@ -8,6 +8,7 @@ const productSchema = new mongoose.Schema(
     searchKey: { type: String, index: 'text' },
     categories: [{ type: mongoose.Schema.Types.ObjectId, ref: "Category", index: true }],
     stock: { type: Number, required: true, default: 0 },
+    minStock: { type: Number, min: 0, default: null },
     mrp: { type: Number, required: true },
     sellingPrice1: { type: Number, required: true, index: true },
     sellingPrice2: { type: Number, required: true },

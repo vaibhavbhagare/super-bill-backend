@@ -1,6 +1,7 @@
 const Product = require("../models/Product");
 const Category = require("../models/Category");
 const mongoose = require("mongoose");
+const { parseProductMinStock } = require("../services/minStockHelper");
 const { Parser } = require("json2csv");
 // Create
 exports.createProduct = async (req, res) => {
@@ -19,12 +20,15 @@ exports.createProduct = async (req, res) => {
       categories = req.body.categoryIds;
     }
 
+    const minStock = parseProductMinStock(req.body.minStock);
+    const { minStock: _omitMin, ...bodyRest } = req.body;
     const product = new Product({
-      ...req.body,
+      ...bodyRest,
       categories,
       barcode,
-      createdBy: req.user.userName, // Use logged-in user's username
-      updatedBy: req.user.userName, // Initially same as createdBy
+      ...(minStock !== undefined ? { minStock } : {}),
+      createdBy: req.user.userName,
+      updatedBy: req.user.userName,
     });
     const saved = await product.save();
     res.status(201).json(saved);
@@ -229,14 +233,30 @@ exports.getProductByBarcode = async (req, res) => {
 exports.updateProduct = async (req, res) => {
   try {
     // Handle categories updates: accept categories[] or categoryIds[] or legacy category string
-    const updateData = {
-      ...req.body,
-      updatedBy: req.user.userName, // Use logged-in user's username
-    };
+    const updateData = { updatedBy: req.user.userName };
+    const fields = { ...req.body };
+    delete fields.minStock;
+
     if (Array.isArray(req.body.categories)) {
-      updateData.categories = req.body.categories;
+      fields.categories = req.body.categories;
     } else if (Array.isArray(req.body.categoryIds)) {
-      updateData.categories = req.body.categoryIds;
+      fields.categories = req.body.categoryIds;
+    }
+
+    Object.assign(updateData, fields);
+
+    if ("minStock" in req.body) {
+      const parsed = parseProductMinStock(req.body.minStock);
+      if (parsed === undefined) {
+        await Product.findByIdAndUpdate(req.params.id, {
+          $set: updateData,
+          $unset: { minStock: "" },
+        });
+        const cleared = await Product.findById(req.params.id);
+        if (!cleared) return res.status(404).json({ error: "Product not found" });
+        return res.json(cleared);
+      }
+      updateData.minStock = parsed;
     }
 
     const updated = await Product.findByIdAndUpdate(req.params.id, updateData, {
