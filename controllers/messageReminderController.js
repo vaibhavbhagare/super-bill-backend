@@ -1,59 +1,9 @@
 const mongoose = require("mongoose");
-const twilio = require("twilio");
 const Customer = require("../models/Customer");
 const ReminderHistory = require("../models/ReminderHistory");
 const { MESSAGE_REMINDER_TEMPLATES } = require("../constants/messageReminderTemplates");
-const { normalizePhoneNumber } = require("./whatsappService");
-
-let twilioClient = null;
-
-const getTwilioClient = () => {
-  if (twilioClient) return twilioClient;
-  const sid = process.env.TWILIO_ACCOUNT_SID;
-  const token = process.env.TWILIO_AUTH_TOKEN;
-  if (!sid || !token || !String(sid).startsWith("AC")) return null;
-  try {
-    twilioClient = twilio(sid, token);
-    return twilioClient;
-  } catch (err) {
-    console.error("Twilio init failed:", err.message);
-    return null;
-  }
-};
-
-const formatAmount = (amount) => {
-  const num = Number(amount) || 0;
-  return num.toLocaleString("en-IN", { maximumFractionDigits: 2 });
-};
-
-const applyMessageTemplate = (template, amount) => {
-  const formatted = formatAmount(amount);
-  return String(template).replace(/\{\{amount\}\}/g, formatted);
-};
-
-const applyStoreName = (text, storeName) => {
-  const name =
-    storeName != null && String(storeName).trim() !== ""
-      ? String(storeName).trim()
-      : "आमचे दुकान";
-  return String(text).replace(/\{\{storeName\}\}/g, name);
-};
-
-const applyReminderPlaceholders = (text, { amount, storeName, useAmount }) => {
-  let out = String(text).trim();
-  if (useAmount && amount != null && Number.isFinite(Number(amount))) {
-    out = applyMessageTemplate(out, amount);
-  }
-  out = applyStoreName(out, storeName);
-  return out;
-};
-
-/**
- * Twilio Content API variable slots are typically "1", "2", … — default amount → "1".
- * Override with TWILLO_REMINDER_AMOUNT_VARIABLE_KEY if your approved WhatsApp template uses a different index.
- */
-const reminderAmountVariableKey = () =>
-  String(process.env.TWILLO_REMINDER_AMOUNT_VARIABLE_KEY || "1").trim() || "1";
+const { getBalancesByCustomerId } = require("../services/khataBalanceService");
+const { sendCustomerReminder } = require("../services/reminderSendService");
 
 exports.getTemplates = async (_req, res) => {
   return res.json({ data: MESSAGE_REMINDER_TEMPLATES });
@@ -94,10 +44,15 @@ exports.getCustomersForReminders = async (req, res) => {
       .sort({ updatedAt: -1 })
       .lean();
 
+    const balanceMap = await getBalancesByCustomerId(
+      customers.map((c) => c._id),
+    );
+
     let enriched = customers.map((c) => ({
       _id: String(c._id),
       fullName: c.fullName,
       phoneNumber: c.phoneNumber,
+      pendingBalance: balanceMap.get(String(c._id))?.balance ?? 0,
     }));
 
     const total = enriched.length;
@@ -116,106 +71,26 @@ exports.getCustomersForReminders = async (req, res) => {
   }
 };
 
-const sendWhatsAppReminderTemplate = async (mobile, contentSid, contentVariables) => {
-  const client = getTwilioClient();
-  if (!client) {
-    throw new Error("Twilio is not configured");
-  }
-
-  const from = process.env.TWILIO_WHATSAPP_FROM;
-  if (!from) {
-    throw new Error("TWILIO_WHATSAPP_FROM is not configured");
-  }
-
-  if (!contentSid) {
-    throw new Error("WhatsApp reminder template SID is not configured for this template");
-  }
-
-  await client.messages.create({
-    from,
-    to: `whatsapp:+91${mobile}`,
-    contentSid,
-    contentVariables: JSON.stringify(
-      contentVariables && Object.keys(contentVariables).length ? contentVariables : {},
-    ),
-  });
-};
-
 const recordAndSendReminder = async ({
   customerId,
   customerName,
   mobileRaw,
-  baseMessage,
   numericAmount,
   storeName,
   useAmountInBody,
-  contentSid,
+  templateId,
   sentBy,
 }) => {
-  const finalMessage = applyReminderPlaceholders(baseMessage, {
-    amount: numericAmount,
+  const balance = useAmountInBody ? numericAmount : 0;
+  return sendCustomerReminder({
+    customerId,
+    customerName,
+    mobileRaw,
+    balance,
+    templateId: templateId || (useAmountInBody ? "with_amount" : undefined),
     storeName,
-    useAmount: useAmountInBody,
+    sentBy,
   });
-  const amountValue = useAmountInBody ? numericAmount : null;
-  const mobile = normalizePhoneNumber(mobileRaw);
-  const contentVariables = useAmountInBody
-    ? { [reminderAmountVariableKey()]: `₹${formatAmount(numericAmount)}` }
-    : {};
-
-  if (!mobile) {
-    await ReminderHistory.create({
-      customerId: customerId || null,
-      customerName: customerName || null,
-      mobile: String(mobileRaw || ""),
-      message: finalMessage,
-      amount: amountValue,
-      status: "failed",
-      errorMessage: "Invalid phone number",
-      sentBy,
-    });
-    return {
-      customerId: customerId ? String(customerId) : null,
-      mobile: String(mobileRaw || ""),
-      status: "failed",
-      error: "Invalid phone number",
-    };
-  }
-
-  try {
-    await sendWhatsAppReminderTemplate(mobile, contentSid, contentVariables);
-    await ReminderHistory.create({
-      customerId: customerId || null,
-      customerName: customerName || null,
-      mobile,
-      message: finalMessage,
-      amount: amountValue,
-      status: "sent",
-      sentBy,
-    });
-    return {
-      customerId: customerId ? String(customerId) : null,
-      mobile,
-      status: "sent",
-    };
-  } catch (sendErr) {
-    await ReminderHistory.create({
-      customerId: customerId || null,
-      customerName: customerName || null,
-      mobile,
-      message: finalMessage,
-      amount: amountValue,
-      status: "failed",
-      errorMessage: sendErr.message,
-      sentBy,
-    });
-    return {
-      customerId: customerId ? String(customerId) : null,
-      mobile,
-      status: "failed",
-      error: sendErr.message,
-    };
-  }
 };
 
 exports.sendReminders = async (req, res) => {
@@ -282,6 +157,9 @@ exports.sendReminders = async (req, res) => {
       }).lean();
 
       const customerById = new Map(customers.map((c) => [String(c._id), c]));
+      const balanceMap = await getBalancesByCustomerId(
+        customers.map((c) => c._id),
+      );
 
       for (const customerId of ids) {
         const customer = customerById.get(String(customerId));
@@ -301,14 +179,21 @@ exports.sendReminders = async (req, res) => {
           customerId: customer._id,
           customerName: customer.fullName,
           mobileRaw: customer.phoneNumber,
-          baseMessage,
-          numericAmount,
+          numericAmount: useAmountInBody
+            ? numericAmount
+            : (balanceMap.get(String(customer._id))?.balance ?? 0),
           storeName,
-          useAmountInBody,
-          contentSid,
+          useAmountInBody:
+            useAmountInBody ||
+            (balanceMap.get(String(customer._id))?.balance ?? 0) > 0,
+          templateId,
           sentBy,
         });
-        results.push({ ...outcome, recipientType: "customer" });
+        results.push({
+          ...outcome,
+          customerId: customerId ? String(customerId) : null,
+          recipientType: "customer",
+        });
         if (outcome.status === "sent") sent += 1;
         else failed += 1;
       }
@@ -325,14 +210,17 @@ exports.sendReminders = async (req, res) => {
         customerId: null,
         customerName: displayName,
         mobileRaw,
-        baseMessage,
-        numericAmount,
+        numericAmount: useAmountInBody ? numericAmount : 0,
         storeName,
         useAmountInBody,
-        contentSid,
+        templateId,
         sentBy,
       });
-      results.push({ ...outcome, recipientType: "manual" });
+      results.push({
+        ...outcome,
+        customerId: null,
+        recipientType: "manual",
+      });
       if (outcome.status === "sent") sent += 1;
       else failed += 1;
     }
