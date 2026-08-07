@@ -16,6 +16,37 @@ const normalizePhone = (value) => {
   return null;
 };
 
+/** Parse YYYY-MM-DD (or Date) as local noon to avoid timezone day-shift. */
+const parseTransactionDate = (value) => {
+  if (value == null || value === "") return new Date();
+
+  const raw = String(value).trim();
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  let date;
+  if (match) {
+    date = new Date(
+      Number(match[1]),
+      Number(match[2]) - 1,
+      Number(match[3]),
+      12,
+      0,
+      0,
+      0,
+    );
+  } else {
+    date = new Date(raw);
+  }
+
+  if (Number.isNaN(date.getTime())) return null;
+
+  const today = new Date();
+  today.setHours(23, 59, 59, 999);
+  if (date.getTime() > today.getTime()) {
+    return null;
+  }
+  return date;
+};
+
 const sortCustomers = (rows, sort) => {
   const list = [...rows];
   switch (sort) {
@@ -210,7 +241,7 @@ exports.getKhataTransactions = async (req, res) => {
       customerId,
       ...activeMatch,
     })
-      .sort({ createdAt: -1 })
+      .sort({ transactionDate: -1, createdAt: -1 })
       .lean();
 
     const pendingBalance = await getCustomerBalance(customerId);
@@ -241,6 +272,7 @@ exports.addKhataTransaction = async (req, res) => {
       type,
       amount,
       note,
+      transactionDate,
       sendAutoReminder = true,
       storeName,
     } = req.body || {};
@@ -252,6 +284,13 @@ exports.addKhataTransaction = async (req, res) => {
     const numericAmount = Number(amount);
     if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
       return res.status(400).json({ error: "amount must be greater than 0" });
+    }
+
+    const parsedTransactionDate = parseTransactionDate(transactionDate);
+    if (transactionDate && !parsedTransactionDate) {
+      return res.status(400).json({
+        error: "Invalid transactionDate. Use YYYY-MM-DD and do not select a future date.",
+      });
     }
 
     let customer = null;
@@ -313,6 +352,7 @@ exports.addKhataTransaction = async (req, res) => {
       amount: numericAmount,
       note: String(note || "").trim(),
       balanceAfter,
+      transactionDate: parsedTransactionDate || new Date(),
       createdBy: sentBy,
       autoReminderSent: false,
       reminderStatus: null,

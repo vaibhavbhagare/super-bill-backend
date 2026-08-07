@@ -21,10 +21,15 @@ async function getBalancesByCustomerId(customerIds = null) {
   const rows = await KhataTransaction.aggregate([
     { $match: match },
     {
+      $addFields: {
+        effectiveDate: { $ifNull: ["$transactionDate", "$createdAt"] },
+      },
+    },
+    {
       $group: {
         _id: "$customerId",
         balance: { $sum: balanceDelta },
-        lastTransactionAt: { $max: "$createdAt" },
+        lastTransactionAt: { $max: "$effectiveDate" },
         transactionCount: { $sum: 1 },
       },
     },

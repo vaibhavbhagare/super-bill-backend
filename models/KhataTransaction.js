@@ -16,6 +16,8 @@ const khataTransactionSchema = new mongoose.Schema(
     amount: { type: Number, required: true, min: 0.01 },
     note: { type: String, default: "" },
     balanceAfter: { type: Number, required: true, default: 0 },
+    /** Business date chosen by user (can be back-dated). Falls back to createdAt in UI. */
+    transactionDate: { type: Date, default: null, index: true },
     autoReminderSent: { type: Boolean, default: false },
     reminderStatus: {
       type: String,
@@ -30,6 +32,11 @@ const khataTransactionSchema = new mongoose.Schema(
 );
 
 khataTransactionSchema.index({ customerId: 1, createdAt: -1 });
+khataTransactionSchema.index({
+  customerId: 1,
+  transactionDate: -1,
+  createdAt: -1,
+});
 khataTransactionSchema.index({ deletedAt: 1 });
 
 module.exports = mongoose.model("KhataTransaction", khataTransactionSchema);
