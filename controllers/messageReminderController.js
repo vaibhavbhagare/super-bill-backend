@@ -15,6 +15,9 @@ exports.getCustomersForReminders = async (req, res) => {
     const limit = Number(req.query.limit) > 0 ? Number(req.query.limit) : 50;
     const skip = (page - 1) * limit;
     const search = (req.query.search || "").trim();
+    const pendingOnly =
+      String(req.query.pendingOnly || "").toLowerCase() === "true" ||
+      req.query.pendingOnly === "1";
 
     const filter = {
       $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
@@ -55,6 +58,10 @@ exports.getCustomersForReminders = async (req, res) => {
       pendingBalance: balanceMap.get(String(c._id))?.balance ?? 0,
     }));
 
+    if (pendingOnly) {
+      enriched = enriched.filter((c) => (Number(c.pendingBalance) || 0) > 0);
+    }
+
     const total = enriched.length;
     const paginated = enriched.slice(skip, skip + limit);
 
@@ -64,6 +71,7 @@ exports.getCustomersForReminders = async (req, res) => {
       page,
       limit,
       totalPages: Math.max(1, Math.ceil(total / limit)),
+      pendingOnly,
     });
   } catch (err) {
     console.error("getCustomersForReminders error:", err);
@@ -95,8 +103,19 @@ const recordAndSendReminder = async ({
 
 exports.sendReminders = async (req, res) => {
   try {
-    const { customerIds, manualRecipients, templateId, amount, storeName } = req.body || {};
+    const {
+      customerIds,
+      manualRecipients,
+      templateId,
+      amount,
+      storeName,
+      sendToAllWithPending,
+      useCustomerPendingAmount,
+    } = req.body || {};
     const sentBy = req.user?.userName || req.user?.name || "system";
+    const sendAllPending = Boolean(sendToAllWithPending);
+    const usePendingAmount =
+      Boolean(useCustomerPendingAmount) || sendAllPending;
 
     if (!templateId) {
       return res.status(400).json({ error: "templateId is required" });
@@ -107,7 +126,6 @@ exports.sendReminders = async (req, res) => {
       return res.status(400).json({ error: `Unknown templateId: ${templateId}` });
     }
 
-    const baseMessage = templateMeta.message;
     const contentSidEnvKey = templateMeta.contentSidEnvKey;
     const contentSid = contentSidEnvKey ? process.env[contentSidEnvKey] : null;
     if (!contentSid) {
@@ -122,7 +140,8 @@ exports.sendReminders = async (req, res) => {
         : NaN;
     const useAmount = Number.isFinite(numericAmount);
 
-    if (templateMeta && templateMeta.includeAmount) {
+    // Bulk / pending-amount modes use each customer's balance for amount templates.
+    if (templateMeta && templateMeta.includeAmount && !usePendingAmount) {
       if (!useAmount) {
         return res
           .status(400)
@@ -137,8 +156,24 @@ exports.sendReminders = async (req, res) => {
 
     const useAmountInBody = !!(templateMeta?.includeAmount && useAmount);
 
-    const ids = Array.isArray(customerIds) ? customerIds : [];
+    let ids = Array.isArray(customerIds) ? customerIds : [];
     const manualList = Array.isArray(manualRecipients) ? manualRecipients : [];
+
+    let pendingBalanceMap = null;
+    if (sendAllPending) {
+      pendingBalanceMap = await getBalancesByCustomerId();
+      ids = [];
+      for (const [customerId, stats] of pendingBalanceMap.entries()) {
+        if ((Number(stats?.balance) || 0) > 0) {
+          ids.push(customerId);
+        }
+      }
+      if (ids.length === 0) {
+        return res.status(400).json({
+          error: "No customers with pending amount greater than 0",
+        });
+      }
+    }
 
     if (ids.length === 0 && manualList.length === 0) {
       return res.status(400).json({
@@ -157,9 +192,9 @@ exports.sendReminders = async (req, res) => {
       }).lean();
 
       const customerById = new Map(customers.map((c) => [String(c._id), c]));
-      const balanceMap = await getBalancesByCustomerId(
-        customers.map((c) => c._id),
-      );
+      const balanceMap =
+        pendingBalanceMap ||
+        (await getBalancesByCustomerId(customers.map((c) => c._id)));
 
       for (const customerId of ids) {
         const customer = customerById.get(String(customerId));
@@ -175,17 +210,30 @@ exports.sendReminders = async (req, res) => {
           continue;
         }
 
+        const customerBalance = balanceMap.get(String(customer._id))?.balance ?? 0;
+
+        // Skip zero/negative when bulk-sending to all with pending
+        if (sendAllPending && !(Number(customerBalance) > 0)) {
+          continue;
+        }
+
+        const amountForCustomer =
+          usePendingAmount && templateMeta.includeAmount
+            ? Number(customerBalance) || 0
+            : useAmountInBody
+              ? numericAmount
+              : Number(customerBalance) || 0;
+
         const outcome = await recordAndSendReminder({
           customerId: customer._id,
           customerName: customer.fullName,
           mobileRaw: customer.phoneNumber,
-          numericAmount: useAmountInBody
-            ? numericAmount
-            : (balanceMap.get(String(customer._id))?.balance ?? 0),
+          numericAmount: amountForCustomer,
           storeName,
           useAmountInBody:
+            (templateMeta.includeAmount && amountForCustomer > 0) ||
             useAmountInBody ||
-            (balanceMap.get(String(customer._id))?.balance ?? 0) > 0,
+            Number(customerBalance) > 0,
           templateId,
           sentBy,
         });

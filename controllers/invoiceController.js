@@ -252,6 +252,7 @@ exports.updateInvoice = async (req, res) => {
       transactionType,
       paidAmount: paidAmountInput,
       updatedBy,
+      customer,
     } = req.body;
 
     const existing = await Invoice.findById(invoiceId);
@@ -369,6 +370,19 @@ exports.updateInvoice = async (req, res) => {
     existing.paidAmount = paidAmount;
     existing.unpaidAmount = unpaidAmount;
     existing.updatedBy = updatedBy || req.user?.userName || req.user?.id || "system";
+
+    if (customer !== undefined && customer !== null && customer !== "") {
+      const customerId =
+        typeof customer === "object" && customer._id != null
+          ? customer._id
+          : customer;
+      const customerDoc = await Customer.findById(customerId);
+      if (!customerDoc || customerDoc.deletedAt) {
+        return res.status(404).json({ error: "Customer not found" });
+      }
+      existing.customer = customerDoc._id;
+    }
+
     // save() bumps updatedAt; set explicitly so sync always sees invoice edits
     // (findByIdAndUpdate with req.body did not update timestamps)
     existing.updatedAt = new Date();
