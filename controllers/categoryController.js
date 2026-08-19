@@ -1,4 +1,5 @@
 const Category = require("../models/Category");
+const { permanentDeleteById } = require("../services/permanentDeleteService");
 
 // Generate a URL-friendly slug; keeps Unicode letters/numbers, replaces others with dashes
 const toSlug = (input) => {
@@ -100,12 +101,19 @@ exports.updateCategory = async (req, res) => {
   }
 };
 
-// Delete (soft)
+// Delete permanently from local + production
 exports.deleteCategory = async (req, res) => {
   try {
-    const deleted = await Category.softDelete(req.params.id, req.user?.userName || "system");
-    if (!deleted) return res.status(404).json({ error: "Category not found" });
-    res.json({ message: "Category deleted" });
+    const existing = await Category.findById(req.params.id);
+    if (!existing) return res.status(404).json({ error: "Category not found" });
+
+    const deletedBy = req.user?.userName || "system";
+    await permanentDeleteById("categories", String(req.params.id), deletedBy);
+    res.json({
+      message: "Category permanently deleted from local and production",
+      deletedBy,
+      deletedAt: new Date(),
+    });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

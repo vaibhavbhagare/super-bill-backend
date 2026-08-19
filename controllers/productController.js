@@ -1,8 +1,13 @@
 const Product = require("../models/Product");
 const Category = require("../models/Category");
+const ProductStats = require("../models/ProductStats");
 const mongoose = require("mongoose");
 const { parseProductMinStock } = require("../services/minStockHelper");
 const { Parser } = require("json2csv");
+const {
+  permanentDeleteById,
+  permanentDeleteMany,
+} = require("../services/permanentDeleteService");
 // Create
 exports.createProduct = async (req, res) => {
   try {
@@ -271,24 +276,27 @@ exports.updateProduct = async (req, res) => {
   }
 };
 
-// Delete
+// Delete permanently from local + production
 exports.deleteProduct = async (req, res) => {
   try {
-    // Log the deletion with user information
     const product = await Product.findById(req.params.id);
     if (!product) return res.status(404).json({ error: "Product not found" });
 
-    // You might want to store deletion information in a separate collection
-    console.log(`Product ${product.name} deleted by ${req.user.userName}`);
+    const deletedBy = req.user?.userName || "system";
+    const productId = String(req.params.id);
+    console.log(`Product ${product.name} permanently deleted by ${deletedBy}`);
 
-    const deleted = await Product.softDelete(
-      req.params.id,
-      req.user?.userName || "system"
+    const statsIds = await ProductStats.find({ product: productId }).distinct(
+      "_id",
     );
+    await permanentDeleteMany("productstats", statsIds, deletedBy);
+    await permanentDeleteById("products", productId, deletedBy);
+
     res.json({
-      message: "Product deleted",
-      deletedBy: req.user.userName,
+      message: "Product permanently deleted from local and production",
+      deletedBy,
       deletedAt: new Date(),
+      cascaded: { productstats: statsIds.length },
     });
   } catch (err) {
     res.status(400).json({ error: err.message });

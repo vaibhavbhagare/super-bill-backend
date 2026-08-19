@@ -1,5 +1,6 @@
 const Attendance = require("../models/Attendance");
 const User = require("../models/User");
+const { permanentDeleteById } = require("../services/permanentDeleteService");
 
 /**
  * Calculate total days in a month
@@ -163,14 +164,14 @@ exports.updateAttendance = async (req, res) => {
 
 exports.deleteAttendance = async (req, res) => {
   try {
-    const attendance = await Attendance.softDelete(
-      req.params.id,
-      req.user?.userName || "system",
-    );
-    if (!attendance) return res.status(404).json({ error: "Not found" });
-    res.json({ 
-      message: "Attendance deleted",
-      deletedBy: req.user?.userName || "system",
+    const existing = await Attendance.findById(req.params.id);
+    if (!existing) return res.status(404).json({ error: "Not found" });
+
+    const deletedBy = req.user?.userName || "system";
+    await permanentDeleteById("attendances", String(req.params.id), deletedBy);
+    res.json({
+      message: "Attendance permanently deleted from local and production",
+      deletedBy,
       deletedAt: new Date(),
     });
   } catch (err) {

@@ -1,4 +1,5 @@
 const Expense = require("../models/Expense");
+const { permanentDeleteById } = require("../services/permanentDeleteService");
 
 // Create expense
 exports.createExpense = async (req, res) => {
@@ -169,24 +170,23 @@ exports.updateExpense = async (req, res) => {
   }
 };
 
-// Delete expense (soft delete)
+// Delete expense permanently from local + production
 exports.deleteExpense = async (req, res) => {
   try {
-    const deletedExpense = await Expense.softDelete(
-      req.params.id,
-      req.user?.userName || "system"
-    );
-
-    if (!deletedExpense) {
+    const existing = await Expense.findById(req.params.id);
+    if (!existing) {
       return res.status(404).json({
         error: "Expense not found",
         code: "NOT_FOUND",
       });
     }
 
+    const deletedBy = req.user?.userName || "system";
+    await permanentDeleteById("expenses", String(req.params.id), deletedBy);
+
     res.json({
-      message: "Expense deleted successfully",
-      deletedBy: req.user.userName,
+      message: "Expense permanently deleted from local and production",
+      deletedBy,
       deletedAt: new Date(),
     });
   } catch (err) {

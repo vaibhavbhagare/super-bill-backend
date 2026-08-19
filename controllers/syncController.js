@@ -11,55 +11,23 @@ exports.getAllUnsyncedCount = async (req, res) => {
 };
 
 // controllers/syncController.js
-const { MongoClient } = require("mongodb");
+const { getDatabases, canUseDualDb } = require("../services/dualDb");
+const {
+  applyDeletionLog,
+  promoteSoftDeleteToPermanent,
+  purgeSoftDeletedRecords,
+  isInDeletionLog,
+  isMetaCollection,
+} = require("../services/permanentDeleteService");
 
-// Configure your local and remote MongoDB URIs
-const LOCAL_URI = process.env.LOCAL_MONGO_URI;
-const REMOTE_URI = process.env.REMOTE_MONGO_URI;
-const localDbName = process.env.LOCAL_DB_NAME;
-const remoteDbName = process.env.REMOTE_DB_NAME; // Use your DB name
-
-// Maintain shared MongoDB clients so that if a connection does not exist
-// during a sync request, it can be (re)initialized lazily here.
-let localClient;
-let remoteClient;
-
-async function getDatabases() {
-  if (!LOCAL_URI || !REMOTE_URI || !localDbName || !remoteDbName) {
-    throw new Error("Database connection configuration is missing");
-  }
-
-  try {
-    // Lazily initiate clients if they don't exist yet
-    if (!localClient) {
-      localClient = await MongoClient.connect(LOCAL_URI);
-    }
-    if (!remoteClient) {
-      remoteClient = await MongoClient.connect(REMOTE_URI);
-    }
-  } catch (err) {
-    // Normalize connection-related errors into a clearer message for the API
-    if (err && (err.code === "ECONNREFUSED" || err.code === "ENOTFOUND")) {
-      throw new Error(
-        "Unable to connect to remote MongoDB. Please check internet connection and REMOTE_MONGO_URI.",
-      );
-    }
-    if (err && err.name === "MongoServerSelectionError") {
-      throw new Error(
-        "MongoDB server selection failed. Remote cluster may be unreachable or blocked.",
-      );
-    }
-    throw err;
-  }
-
-  const dbLocal = localClient.db(localDbName);
-  const dbRemote = remoteClient.db(remoteDbName);
-
-  if (!dbLocal || !dbRemote) {
-    throw new Error("Database connection could not be initialized");
-  }
-
-  return { dbLocal, dbRemote };
+function assertDesktopSyncAvailable(res) {
+  if (canUseDualDb()) return true;
+  res.status(400).json({
+    message:
+      "Sync is only available from the desktop app with the local API. It is not supported in web/production mode.",
+    code: "SYNC_DESKTOP_ONLY",
+  });
+  return false;
 }
 
 // Helper: get last sync time for a collection
@@ -80,7 +48,7 @@ async function getUserCollections(db) {
   const all = await db.listCollections().toArray();
   return all
     .map((c) => c.name)
-    .filter((name) => !["sync_meta", "system.indexes"].includes(name));
+    .filter((name) => !isMetaCollection(name));
 }
 
 // Helper: natural key per collection for matching documents across databases
@@ -145,6 +113,7 @@ function buildNaturalKeyString(collectionName, doc) {
 
 // Helper: full reconciliation for collections that rely heavily on natural keys
 async function fullSyncByNaturalKey(collectionName, dbLocal, dbRemote) {
+  const dbs = { dbLocal, dbRemote };
   const [localAll, remoteAll] = await Promise.all([
     dbLocal.collection(collectionName).find({}).toArray(),
     dbRemote.collection(collectionName).find({}).toArray(),
@@ -181,22 +150,45 @@ async function fullSyncByNaturalKey(collectionName, dbLocal, dbRemote) {
     const localDoc = localMap.get(key) || null;
     const remoteDoc = remoteMap.get(key) || null;
 
+    const candidateIds = [localDoc, remoteDoc]
+      .filter(Boolean)
+      .map((d) => d._id);
+    let loggedDeleted = false;
+    for (const id of candidateIds) {
+      if (await isInDeletionLog(dbs, collectionName, id)) {
+        loggedDeleted = true;
+        await promoteSoftDeleteToPermanent(
+          dbLocal,
+          dbRemote,
+          collectionName,
+          { _id: id },
+          "sync",
+        );
+      }
+    }
+    if (loggedDeleted) continue;
+
+    const localDeleted = !!(localDoc && localDoc.deletedAt);
+    const remoteDeleted = !!(remoteDoc && remoteDoc.deletedAt);
+    if (localDeleted || remoteDeleted) {
+      const tombstone = localDeleted ? localDoc : remoteDoc;
+      await promoteSoftDeleteToPermanent(
+        dbLocal,
+        dbRemote,
+        collectionName,
+        tombstone,
+        tombstone.deletedBy || "sync",
+      );
+      continue;
+    }
+
     let winner = localDoc || remoteDoc;
     if (localDoc && remoteDoc) {
-      const localDeleted = !!(localDoc.deletedAt && localDoc.deletedAt !== null);
-      const remoteDeleted = !!(
-        remoteDoc.deletedAt && remoteDoc.deletedAt !== null
-      );
-
-      if (localDeleted || remoteDeleted) {
-        winner = localDeleted ? localDoc : remoteDoc;
-      } else {
-        const localUpdated = localDoc.updatedAt || localDoc.createdAt || new Date(0);
-        const remoteUpdated =
-          remoteDoc.updatedAt || remoteDoc.createdAt || new Date(0);
-        winner =
-          new Date(remoteUpdated) > new Date(localUpdated) ? remoteDoc : localDoc;
-      }
+      const localUpdated = localDoc.updatedAt || localDoc.createdAt || new Date(0);
+      const remoteUpdated =
+        remoteDoc.updatedAt || remoteDoc.createdAt || new Date(0);
+      winner =
+        new Date(remoteUpdated) > new Date(localUpdated) ? remoteDoc : localDoc;
     }
 
     if (!winner) continue;
@@ -233,6 +225,7 @@ async function fullSyncByNaturalKey(collectionName, dbLocal, dbRemote) {
 
 // GET /api/sync/status
 exports.getSyncStatus = async (req, res) => {
+  if (!assertDesktopSyncAvailable(res)) return;
   try {
     const { dbLocal, dbRemote } = await getDatabases();
 
@@ -273,37 +266,13 @@ exports.getSyncStatus = async (req, res) => {
 };
 
 // DELETE /api/sync/purge-deleted
-// Hard delete all documents that have a deletedAt flag
+// Permanently remove soft-deleted docs from BOTH DBs and record sync_deletions
+// so sync cannot restore them.
 exports.purgeDeletedRecords = async (req, res) => {
+  if (!assertDesktopSyncAvailable(res)) return;
   const { collection } = req.body; // optional single collection
   try {
-    const { dbLocal, dbRemote } = await getDatabases();
-
-    const collections = collection
-      ? [collection]
-      : await getUserCollections(dbLocal);
-
-    const result = [];
-    for (const col of collections) {
-      try {
-        const localDelRes = await dbLocal
-          .collection(col)
-          .deleteMany({ deletedAt: { $exists: true, $ne: null } });
-        const remoteDelRes = await dbRemote
-          .collection(col)
-          .deleteMany({ deletedAt: { $exists: true, $ne: null } });
-        result.push({
-          collection: col,
-          localDeletedRemoved: localDelRes.deletedCount,
-          remoteDeletedRemoved: remoteDelRes.deletedCount,
-        });
-      } catch (err) {
-        result.push({
-          collection: col,
-          error: err.message,
-        });
-      }
-    }
+    const result = await purgeSoftDeletedRecords(collection || null);
     res.json(result);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -564,9 +533,15 @@ exports.purgeDeletedRecords = async (req, res) => {
 
 // POST /api/sync
 exports.syncCollections = async (req, res) => {
+  if (!assertDesktopSyncAvailable(res)) return;
   const { collection } = req.body;
   try {
     const { dbLocal, dbRemote } = await getDatabases();
+    const dbs = { dbLocal, dbRemote };
+
+    // Apply permanent deletion log first so deleted docs are never restored.
+    await applyDeletionLog(dbLocal, dbRemote);
+
     let collections = collection ? [collection] : await getUserCollections(dbLocal);
     const results = [];
 
@@ -597,26 +572,40 @@ exports.syncCollections = async (req, res) => {
           .toArray();
 
         for (const remoteDoc of remoteChanges) {
+          if (await isInDeletionLog(dbs, col, remoteDoc._id)) {
+            await promoteSoftDeleteToPermanent(
+              dbLocal,
+              dbRemote,
+              col,
+              remoteDoc,
+              "sync",
+            );
+            continue;
+          }
+
           const filter = getNaturalKeyFilter(col, remoteDoc);
           const localDoc = await dbLocal.collection(col).findOne(filter);
           const { _id, ...remoteDataWithoutId } = remoteDoc;
 
-          if (remoteDoc.deletedAt) {
-            await dbLocal.collection(col).updateOne(
-              filter,
-              { $set: { deletedAt: remoteDoc.deletedAt, updatedAt: now } },
-              { upsert: true },
+          if (remoteDoc.deletedAt || (localDoc && localDoc.deletedAt)) {
+            await promoteSoftDeleteToPermanent(
+              dbLocal,
+              dbRemote,
+              col,
+              remoteDoc.deletedAt ? remoteDoc : localDoc,
+              (remoteDoc.deletedBy || localDoc?.deletedBy || "sync"),
             );
-          } else if (
+            continue;
+          }
+
+          if (
             !localDoc ||
             new Date(remoteDoc.updatedAt || 0) >
               new Date(localDoc.updatedAt || 0)
           ) {
-            if (!localDoc || !localDoc.deletedAt) {
-              await dbLocal
-                .collection(col)
-                .updateOne(filter, { $set: remoteDataWithoutId }, { upsert: true });
-            }
+            await dbLocal
+              .collection(col)
+              .updateOne(filter, { $set: remoteDataWithoutId }, { upsert: true });
           }
         }
 
@@ -632,26 +621,40 @@ exports.syncCollections = async (req, res) => {
           .toArray();
 
         for (const localDoc of localChanges) {
+          if (await isInDeletionLog(dbs, col, localDoc._id)) {
+            await promoteSoftDeleteToPermanent(
+              dbLocal,
+              dbRemote,
+              col,
+              localDoc,
+              "sync",
+            );
+            continue;
+          }
+
           const filter = getNaturalKeyFilter(col, localDoc);
           const remoteDoc = await dbRemote.collection(col).findOne(filter);
           const { _id, ...localDataWithoutId } = localDoc;
 
-          if (localDoc.deletedAt) {
-            await dbRemote.collection(col).updateOne(
-              filter,
-              { $set: { deletedAt: localDoc.deletedAt, updatedAt: now } },
-              { upsert: true },
+          if (localDoc.deletedAt || (remoteDoc && remoteDoc.deletedAt)) {
+            await promoteSoftDeleteToPermanent(
+              dbLocal,
+              dbRemote,
+              col,
+              localDoc.deletedAt ? localDoc : remoteDoc,
+              (localDoc.deletedBy || remoteDoc?.deletedBy || "sync"),
             );
-          } else if (
+            continue;
+          }
+
+          if (
             !remoteDoc ||
             new Date(localDoc.updatedAt || 0) >
               new Date(remoteDoc.updatedAt || 0)
           ) {
-            if (!remoteDoc || !remoteDoc.deletedAt) {
-              await dbRemote
-                .collection(col)
-                .updateOne(filter, { $set: localDataWithoutId }, { upsert: true });
-            }
+            await dbRemote
+              .collection(col)
+              .updateOne(filter, { $set: localDataWithoutId }, { upsert: true });
           }
         }
 

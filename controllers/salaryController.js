@@ -1,4 +1,5 @@
 const Salary = require("../models/Salary");
+const { permanentDeleteById } = require("../services/permanentDeleteService");
 
 exports.createSalary = async (req, res) => {
   try {
@@ -37,14 +38,14 @@ exports.updateSalary = async (req, res) => {
 
 exports.deleteSalary = async (req, res) => {
   try {
-    const salary = await Salary.softDelete(
-      req.params.id,
-      req.user?.userName || "system",
-    );
-    if (!salary) return res.status(404).json({ error: "Not found" });
-    res.json({ 
-      message: "Salary deleted",
-      deletedBy: req.user?.userName || "system",
+    const existing = await Salary.findById(req.params.id);
+    if (!existing) return res.status(404).json({ error: "Not found" });
+
+    const deletedBy = req.user?.userName || "system";
+    await permanentDeleteById("salaries", String(req.params.id), deletedBy);
+    res.json({
+      message: "Salary permanently deleted from local and production",
+      deletedBy,
       deletedAt: new Date(),
     });
   } catch (err) {

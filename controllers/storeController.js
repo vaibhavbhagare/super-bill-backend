@@ -1,4 +1,5 @@
 const Store = require("../models/store");
+const { permanentDeleteById } = require("../services/permanentDeleteService");
 
 // ✅ Create a Store
 exports.createStore = async (req, res) => {
@@ -167,23 +168,24 @@ exports.updateStore = async (req, res) => {
   }
 };
 
-// ✅ Delete Store
+// ✅ Delete Store permanently from local + production
 exports.deleteStore = async (req, res) => {
   try {
-    const deletedStore = await Store.softDelete(
-      req.params.id,
-      req.user?.userName || "system",
-    );
-    if (!deletedStore) {
+    const existing = await Store.findById(req.params.id);
+    if (!existing) {
       return res.status(404).json({
         success: false,
         message: "Store not found",
       });
     }
+
+    const deletedBy = req.user?.userName || "system";
+    await permanentDeleteById("stores", String(req.params.id), deletedBy);
+
     res.status(200).json({
       success: true,
-      message: "Store deleted successfully",
-      deletedBy: req.user?.userName || "system",
+      message: "Store permanently deleted from local and production",
+      deletedBy,
       deletedAt: new Date(),
     });
   } catch (error) {

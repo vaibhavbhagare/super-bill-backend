@@ -495,7 +495,9 @@ exports.getProductStatsReport = async (req, res) => {
           ],
           notSellingProducts: [
             {
+              // Use ProductStats.lastSoldAt only — never product.updatedAt (stock edits bump that).
               $match: {
+                stock: { $gt: 0 },
                 $or: [
                   { lastSoldAt: null },
                   { lastSoldAt: { $lt: staleBefore } },
@@ -504,7 +506,7 @@ exports.getProductStatsReport = async (req, res) => {
             },
             {
               $addFields: {
-                // null => never had a sale in ProductStats; else whole days since last sale (UTC-ish)
+                // null => never sold (no ProductStats / no lastSoldAt); else whole days since last sale
                 daysSinceLastSale: {
                   $cond: [
                     { $eq: ["$lastSoldAt", null] },
@@ -523,7 +525,8 @@ exports.getProductStatsReport = async (req, res) => {
                 },
               },
             },
-            { $sort: { lastSoldAt: 1 } },
+            // Longest unsold first (never sold / oldest lastSoldAt), then highest stock
+            { $sort: { lastSoldAt: 1, stock: -1 } },
             {
               $project: {
                 _id: 0,
@@ -574,7 +577,7 @@ exports.getProductStatsReport = async (req, res) => {
         thresholdDays: notSellingDays,
         staleBefore: staleBefore.toISOString(),
         rule:
-          "A product is listed if it has no ProductStats row (never sold) or lastSoldAt is strictly before staleBefore (now minus thresholdDays).",
+          "Listed when stock > 0 AND (no ProductStats.lastSoldAt / never sold OR lastSoldAt < now - thresholdDays). Ignores product.updatedAt so stock edits do not affect this list. Sorted by lastSoldAt ASC (never sold / oldest first), then stock DESC.",
       },
       notSellingProducts: result?.notSellingProducts || [],
     });

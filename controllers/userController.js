@@ -5,6 +5,12 @@ const Customer = require("../models/Customer");
 const { AuthenticationError } = require("../middleware/auth");
 const { addToBlacklist } = require("../services/tokenBlacklist");
 const { sendCustomWhatsAppMessage } = require("./whatsappService");
+const Attendance = require("../models/Attendance");
+const Salary = require("../models/Salary");
+const {
+  permanentDeleteById,
+  permanentDeleteMany,
+} = require("../services/permanentDeleteService");
 
 // Generate JWT token
 const generateToken = (user) => {
@@ -290,7 +296,7 @@ exports.updateUser = async (req, res) => {
   }
 };
 
-// Delete user (protected route)
+// Delete user permanently from local + production (protected route)
 exports.deleteUser = async (req, res) => {
   try {
     const targetUser = await User.findById(req.params.id);
@@ -308,23 +314,30 @@ exports.deleteUser = async (req, res) => {
       });
     }
 
-    const deleted = await User.softDelete(
-      req.params.id,
-      req.user?.userName || "system",
-    );
-    if (!deleted)
-      return res.status(404).json({
-        error: "User not found",
-        code: "NOT_FOUND",
-      });
+    const deletedBy = req.user?.userName || "system";
+    const userId = String(req.params.id);
+
+    const [attendanceIds, salaryIds] = await Promise.all([
+      Attendance.find({ user: userId }).distinct("_id"),
+      Salary.find({ user: userId }).distinct("_id"),
+    ]);
+    await permanentDeleteMany("attendances", attendanceIds, deletedBy);
+    await permanentDeleteMany("salaries", salaryIds, deletedBy);
+    await permanentDeleteById("users", userId, deletedBy);
+
     res.json({
-      message: "User deleted",
-      deletedBy: req.user.userName,
+      message: "User permanently deleted from local and production",
+      deletedBy,
       deletedAt: new Date(),
+      cascaded: {
+        attendances: attendanceIds.length,
+        salaries: salaryIds.length,
+      },
     });
   } catch (err) {
+    console.error("deleteUser error:", err);
     res.status(500).json({
-      error: "Internal server error",
+      error: err.message || "Internal server error",
       code: "INTERNAL_ERROR",
     });
   }
