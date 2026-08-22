@@ -182,7 +182,7 @@ async def enrich_products_with_gemini(request: GeminiEnrichRequest):
     """
     Use Gemini to set name, secondName (Marathi), searchKey, description (English),
     secondaryDescription (Marathi), product `categories` (from DB category catalog), and
-    generateContentFromAI on products.
+    generateContentFromAI on products that are not soft-deleted.
 
     **Test one queued product:** `{"limit": 1}`
 

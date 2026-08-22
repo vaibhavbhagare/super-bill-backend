@@ -79,6 +79,8 @@ const orderSchema = new mongoose.Schema(
     },
     paymentStatus: { type: String, enum: ["PAID", "UNPAID"], default: "UNPAID" },
     paymentMethod: { type: String, enum: ["ONLINE", "CASH", "COD"], default: "COD" },
+    razorpayOrderId: { type: String, index: true, sparse: true },
+    razorpayPaymentId: { type: String, index: true, sparse: true },
     channel: { type: String, enum: ["ONLINE"], default: "ONLINE", index: true },
     placedAt: { type: Date },
     completedAt: { type: Date },

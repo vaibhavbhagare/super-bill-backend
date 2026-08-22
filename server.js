@@ -22,7 +22,7 @@ app.use(
     origin: process.env.CORS_ORIGIN || "*",
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    allowedHeaders: ["Content-Type", "Authorization", "x-customer-id"],
   }),
 );
 
@@ -33,8 +33,14 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// 🧾 Body parser
-app.use(bodyParser.json());
+// 🧾 Body parser (keep raw body for Razorpay webhook HMAC)
+app.use(
+  bodyParser.json({
+    verify: (req, res, buf) => {
+      req.rawBody = buf.toString("utf8");
+    },
+  }),
+);
 app.use(bodyParser.urlencoded({ extended: true }));
 
 // 🗂️ Database connection setup

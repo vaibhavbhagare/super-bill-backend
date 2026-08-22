@@ -98,8 +98,23 @@ const optionalAuth = async (req, res, next) => {
   next();
 };
 
+const requireCustomer = (req, res, next) => {
+  auth(req, res, () => {
+    if (res.headersSent) return;
+    if (!req.customer) {
+      return res.status(401).json({
+        success: false,
+        error: "Please sign in to continue payment.",
+        code: "AUTH_ERROR",
+      });
+    }
+    next();
+  });
+};
+
 module.exports = {
   auth,
   optionalAuth,
+  requireCustomer,
   AuthenticationError,
 };

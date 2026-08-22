@@ -23,6 +23,7 @@ ERROR_BACKOFF_S = 10
 CATEGORIES_COLLECTION = "categories"
 # MongoDB product.categories is an array; Gemini may return several ids (cap for safety).
 MAX_CATEGORY_IDS_PER_PRODUCT = 8
+NOT_DELETED = {"$or": [{"deletedAt": None}, {"deletedAt": {"$exists": False}}]}
 
 
 def _strip_json_fence(text: str) -> str:
@@ -42,7 +43,7 @@ def _configure_gemini() -> None:
 def _load_category_catalog(db: Any) -> Tuple[List[Dict[str, Any]], Set[str]]:
     """Active categories from MongoDB (not soft-deleted). Returns catalog rows + allowed id strings."""
     coll = db[CATEGORIES_COLLECTION]
-    q = {"$or": [{"deletedAt": None}, {"deletedAt": {"$exists": False}}]}
+    q = NOT_DELETED
     catalog: List[Dict[str, Any]] = []
     allowed: Set[str] = set()
     for doc in coll.find(q, projection={"name": 1, "secondaryName": 1}):
@@ -56,6 +57,28 @@ def _load_category_catalog(db: Any) -> Tuple[List[Dict[str, Any]], Set[str]]:
             }
         )
     return catalog, allowed
+
+
+def _search_key_tokens(raw: Any) -> List[str]:
+    """Split a searchKey string into trimmed tokens (comma / semicolon / pipe)."""
+    if raw is None:
+        return []
+    s = str(raw).strip()
+    if not s:
+        return []
+    return [p.strip() for p in re.split(r"[,;|]+", s) if p.strip()]
+
+
+def _merge_search_key(new_value: Any, old_value: Any) -> str:
+    """Gemini keywords first, then unique existing tokens (case-insensitive)."""
+    seen: Set[str] = set()
+    out: List[str] = []
+    for token in _search_key_tokens(new_value) + _search_key_tokens(old_value):
+        key = token.casefold()
+        if key not in seen:
+            seen.add(key)
+            out.append(token)
+    return ", ".join(out)
 
 
 def _parse_category_ids(value: Any, allowed: Set[str]) -> List[ObjectId]:
@@ -134,7 +157,7 @@ Input products from our database (in order — produce one result per entry, sam
 Each object includes:
 - "name" (required): primary product name from the system. Use this as the default source when other fields are missing.
 - "existingSecondName" (optional): current Marathi name in DB if any — refine it for natural local wording; align with the corrected English "name".
-- "existingSearchKey" (optional): current search keywords in DB if any — keep useful tokens, add English + Hinglish, reach 5-7 keywords total.
+- "existingSearchKey" (optional): current search keywords in DB if any — generate new English + Hinglish tokens; the API will append the old searchKey after yours.
 - "existingCategoryIds" (optional): current category MongoDB ids — refine against AUTHORIZED CATEGORIES when that list is provided below.
 
 When "existingSecondName" or "existingSearchKey" are absent, infer "secondName" and "searchKey" only from "name".
@@ -144,7 +167,7 @@ When "existingSecondName" or "existingSearchKey" are absent, infer "secondName" 
 Tasks (for EACH input object above):
 1. 'name': Correct the English name. Capitalize properly. Include Brand, Product, and Weight/Size (e.g., "Tata Tea Gold 500g").
 2. 'secondName': Provide the name in Marathi script. Ensure it sounds natural for a local customer (e.g., "टाटा टी गोल्ड ५०० ग्रॅम").
-3. 'searchKey': Generate 5-7 comma-separated keywords in English and Hinglish (e.g., "tea, chai, tata tea, bhukri, morning tea").
+3. 'searchKey': Generate 5-7 new comma-separated keywords in English and Hinglish (e.g., "tea, chai, tata tea, bhukri, morning tea"). Do not drop this field; existing keywords are merged in code.
 4. 'description': Write a 2-sentence English description. Focus on quality, usage, and shelf-life or taste. Use a professional e-commerce tone.
 5. 'secondaryDescription': Write the same description in Marathi. Ensure it is persuasive for local shoppers.
 {category_block}
@@ -172,6 +195,16 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, datetime):
         return value.isoformat()
     try:
+        from bson.datetime_ms import DatetimeMS
+
+        if isinstance(value, DatetimeMS):
+            try:
+                return value.as_datetime().isoformat()
+            except (OverflowError, ValueError, OSError, ArithmeticError):
+                return int(value)
+    except ImportError:
+        pass
+    try:
         from bson import Decimal128
 
         if isinstance(value, Decimal128):
@@ -195,6 +228,8 @@ def run_gemini_enrichment(
     """
     Fetch products, call Gemini in batches of up to 10, update MongoDB.
 
+    Soft-deleted products (deletedAt set) are skipped.
+
     - No productId: documents with generateContentFromAI != true, capped by limit
       (default cap 2000 per call, same spirit as your script).
     - productId: single document by _id; respects generateContentFromAI unless force=True.
@@ -213,9 +248,9 @@ def run_gemini_enrichment(
         except InvalidId as e:
             raise ValueError(f"Invalid productId: {e}") from e
 
-        doc = coll.find_one({"_id": oid})
+        doc = coll.find_one({"_id": oid, **NOT_DELETED})
         if not doc:
-            raise ValueError("Product not found")
+            raise ValueError("Product not found or is deleted")
 
         if doc.get("generateContentFromAI") is True and not force:
             return {
@@ -229,7 +264,7 @@ def run_gemini_enrichment(
         products: List[Dict[str, Any]] = [doc]
     else:
         cap = limit if limit is not None else DEFAULT_QUEUE_CAP
-        query = {"generateContentFromAI": {"$ne": True}}
+        query = {"generateContentFromAI": {"$ne": True}, **NOT_DELETED}
         cursor = coll.find(query).limit(cap)
         products = list(cursor)
 
@@ -285,7 +320,10 @@ def run_gemini_enrichment(
                 update_fields = {
                     "name": data.get("name"),
                     "secondName": data.get("secondName"),
-                    "searchKey": data.get("searchKey"),
+                    "searchKey": _merge_search_key(
+                        data.get("searchKey"),
+                        batch[index].get("searchKey"),
+                    ),
                     "description": data.get("description"),
                     "secondaryDescription": data.get("secondaryDescription"),
                     "generateContentFromAI": True,
@@ -297,7 +335,7 @@ def run_gemini_enrichment(
                         allowed_category_ids,
                     )
                 doc_after = coll.find_one_and_update(
-                    {"_id": pid},
+                    {"_id": pid, **NOT_DELETED},
                     {"$set": update_fields},
                     return_document=ReturnDocument.AFTER,
                 )

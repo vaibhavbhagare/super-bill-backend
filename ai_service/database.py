@@ -35,7 +35,10 @@ class Database:
                 cls._client = MongoClient(
                     uri,
                     serverSelectionTimeoutMS=5000,
-                    connectTimeoutMS=10000
+                    connectTimeoutMS=10000,
+                    # Some product docs have out-of-range BSON dates (e.g. year 122025);
+                    # DATETIME_AUTO returns DatetimeMS for those instead of raising InvalidBSON.
+                    datetime_conversion="DATETIME_AUTO",
                 )
                 # Test connection
                 cls._client.admin.command('ping')

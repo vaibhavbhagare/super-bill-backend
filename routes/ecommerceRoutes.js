@@ -2,8 +2,9 @@ const express = require("express");
 const router = express.Router();
 const ecommerceController = require("../controllers/ecommerceController");
 const ecommerceOrderController = require("../controllers/ecommerceOrderController");
+const ecommercePaymentController = require("../controllers/ecommercePaymentController");
 const invoiceController = require("../controllers/invoiceController");
-const { auth, optionalAuth } = require("../middleware/auth");
+const { auth, optionalAuth, requireCustomer } = require("../middleware/auth");
 const {
   productSearchLimiter,
   productDetailLimiter,
@@ -81,6 +82,11 @@ router.get("/categories",
 );
 
 router.get("/purchases/live", invoiceController.getRecentPurchases);
+
+router.post("/payments/create-order", requireCustomer, ecommercePaymentController.createOrder);
+router.post("/payments/verify", requireCustomer, ecommercePaymentController.verifyPayment);
+router.get("/payments/by-order/:orderId", requireCustomer, ecommercePaymentController.getByOrder);
+router.post("/payments/webhook", ecommercePaymentController.webhook);
 
 // Orders (no server-side cart)
 router.post("/orders/place", optionalAuth, ecommerceOrderController.placeOrder);

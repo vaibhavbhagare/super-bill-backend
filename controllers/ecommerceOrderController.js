@@ -2,6 +2,7 @@ const Order = require("../models/Order");
 const Product = require("../models/Product");
 const Customer = require("../models/Customer");
 const Invoice = require("../models/Invoice");
+const Payment = require("../models/Payment");
 const orderWhatsApp = require("../services/whatsappOrderNotificationService");
 
 // Helpers: generate a unique-ish online invoice number
@@ -22,7 +23,8 @@ const calculateSummary = (items) => {
   const subtotal = items.reduce((sum, it) => sum + (it.subtotal || (it.quantity * it.price)), 0);
   const discount = items.reduce((sum, it) => sum + (it.discount || 0), 0);
   const gst = 0; // Not specified in e-comm flow
-  const total = Math.max(subtotal - discount + gst, 0);
+  // Payable amount is selling price total. `discount` is savings vs MRP only.
+  const total = Math.max(subtotal + gst, 0);
   return { subtotal, discount, gst, total };
 };
 
@@ -133,7 +135,15 @@ exports.clearCart = async (req, res) => {
 // PLACE ORDER (no server-side cart)
 exports.placeOrder = async (req, res) => {
   try {
-    const { customerId, customerInfo, paymentMethod = "COD", products, orderType } = req.body;
+    const {
+      customerId,
+      customerInfo,
+      paymentMethod = "COD",
+      products,
+      orderType,
+      razorpayOrderId,
+      razorpayPaymentId,
+    } = req.body;
     if (!Array.isArray(products) || products.length === 0) {
       return res.status(400).json({ success: false, error: "products array required" });
     }
@@ -178,19 +188,55 @@ exports.placeOrder = async (req, res) => {
       }
     }
 
-    // Reserve stock
-    for (const it of items) {
-      const prod = idToProduct.get(String(it.product));
-      // it.product is ObjectId, so map lookup by String
+    const billingSummary = calculateSummary(items);
+    const method = String(paymentMethod || "COD").toUpperCase();
+    let verifiedPayment = null;
+
+    if (method === "ONLINE") {
+      if (!req.customer) {
+        return res.status(401).json({
+          success: false,
+          error: "Please sign in to pay online.",
+        });
+      }
+      if (!razorpayOrderId || !razorpayPaymentId) {
+        return res.status(400).json({
+          success: false,
+          error: "Online payment is required before placing this order.",
+        });
+      }
+      verifiedPayment = await Payment.findOne({
+        razorpayOrderId,
+        razorpayPaymentId,
+        customerId: req.customer._id,
+        status: "PAID",
+      });
+      if (!verifiedPayment) {
+        return res.status(400).json({
+          success: false,
+          error: "Payment was not verified.",
+        });
+      }
+      if (verifiedPayment.storeOrderId) {
+        return res.status(400).json({
+          success: false,
+          error: "This payment was already used for an order.",
+        });
+      }
+      if (verifiedPayment.amountInPaise !== Math.round(billingSummary.total * 100)) {
+        return res.status(400).json({
+          success: false,
+          error: "Paid amount does not match the order.",
+        });
+      }
     }
+
     for (const reqItem of requested) {
       const prod = idToProduct.get(String(reqItem.productId));
       prod.stock -= reqItem.quantity;
       await prod.save();
     }
 
-    // Create order directly
-    const billingSummary = calculateSummary(items);
     const actorName = req.user
       ? req.user.userName
       : (req.customer ? (req.customer.fullName || req.customer.userName || String(req.customer.phoneNumber) || "customer") : "guest");
@@ -203,8 +249,10 @@ exports.placeOrder = async (req, res) => {
       orderType: ["HOME_DELIVERY", "STORE_PICKUP"].includes((orderType || "").toUpperCase())
         ? (orderType || "").toUpperCase()
         : "HOME_DELIVERY",
-      paymentMethod,
-      paymentStatus: paymentMethod === "ONLINE" ? "PAID" : "UNPAID",
+      paymentMethod: method === "ONLINE" ? "ONLINE" : method === "CASH" ? "CASH" : "COD",
+      paymentStatus: method === "ONLINE" ? "PAID" : "UNPAID",
+      razorpayOrderId: verifiedPayment ? verifiedPayment.razorpayOrderId : undefined,
+      razorpayPaymentId: verifiedPayment ? verifiedPayment.razorpayPaymentId : undefined,
       customer: customer ? customer._id : undefined,
       customerSnapshot: customer
         ? { fullName: customer.fullName, phoneNumber: customer.phoneNumber, address: customer.address }
@@ -214,6 +262,11 @@ exports.placeOrder = async (req, res) => {
       channel: "ONLINE",
       createdBy: actorName,
     });
+
+    if (verifiedPayment) {
+      verifiedPayment.storeOrderId = order._id;
+      await verifiedPayment.save();
+    }
 
     orderWhatsApp.scheduleOrderWhatsApp(() => orderWhatsApp.onOrderPlaced(order.toObject ? order.toObject() : order));
 
