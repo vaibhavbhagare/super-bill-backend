@@ -23,7 +23,6 @@ const customerSchema = new mongoose.Schema(
       ],
       default: [],
     },
-    notepadPage: { type: String, default: null },
     isSynced: { type: Boolean },
     createdBy: String,
     deletedAt: { type: Date, default: null },
