@@ -486,6 +486,8 @@ exports.getProductStatsReport = async (req, res) => {
                 name: "$_prod.name",
                 secondName: "$_prod.secondName",
                 stock: "$_prod.stock",
+                mrp: "$_prod.mrp",
+                sellingPrice1: "$_prod.sellingPrice1",
                 minStock: "$minStock",
                 effectiveMinStock: {
                   $ifNull: ["$minStock", storeDefaultMinStock],

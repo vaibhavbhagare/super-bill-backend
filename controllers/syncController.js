@@ -11,7 +11,7 @@ exports.getAllUnsyncedCount = async (req, res) => {
 };
 
 // controllers/syncController.js
-const { getDatabases, canUseDualDb } = require("../services/dualDb");
+const { getDatabases, canUseDualDb, ensureRemoteForSync } = require("../services/dualDb");
 const {
   applyDeletionLog,
   promoteSoftDeleteToPermanent,
@@ -531,161 +531,165 @@ exports.purgeDeletedRecords = async (req, res) => {
 // };
 
 
+async function syncOneCollection(col, dbLocal, dbRemote) {
+  const dbs = { dbLocal, dbRemote };
+
+  if (["attendances", "productstats"].includes(col)) {
+    const { localCount, remoteCount, lastSync } =
+      await fullSyncByNaturalKey(col, dbLocal, dbRemote);
+    return { collection: col, localCount, remoteCount, lastSync };
+  }
+
+  const lastSync = await getLastSync(dbLocal, col);
+  const now = new Date();
+
+  const remoteIdsArr = await dbRemote.collection(col).distinct("_id");
+  const localIdsArr = await dbLocal.collection(col).distinct("_id");
+
+  const remoteChanges = await dbRemote
+    .collection(col)
+    .find({
+      $or: [
+        { updatedAt: { $gt: lastSync } },
+        { _id: { $nin: localIdsArr } },
+        { deletedAt: { $exists: true, $ne: null } },
+      ],
+    })
+    .toArray();
+
+  for (const remoteDoc of remoteChanges) {
+    if (await isInDeletionLog(dbs, col, remoteDoc._id)) {
+      await promoteSoftDeleteToPermanent(
+        dbLocal,
+        dbRemote,
+        col,
+        remoteDoc,
+        "sync",
+      );
+      continue;
+    }
+
+    const filter = getNaturalKeyFilter(col, remoteDoc);
+    const localDoc = await dbLocal.collection(col).findOne(filter);
+    const { _id, ...remoteDataWithoutId } = remoteDoc;
+
+    if (remoteDoc.deletedAt || (localDoc && localDoc.deletedAt)) {
+      await promoteSoftDeleteToPermanent(
+        dbLocal,
+        dbRemote,
+        col,
+        remoteDoc.deletedAt ? remoteDoc : localDoc,
+        remoteDoc.deletedBy || localDoc?.deletedBy || "sync",
+      );
+      continue;
+    }
+
+    if (
+      !localDoc ||
+      new Date(remoteDoc.updatedAt || 0) > new Date(localDoc.updatedAt || 0)
+    ) {
+      await dbLocal
+        .collection(col)
+        .updateOne(filter, { $set: remoteDataWithoutId }, { upsert: true });
+    }
+  }
+
+  const localChanges = await dbLocal
+    .collection(col)
+    .find({
+      $or: [
+        { updatedAt: { $gt: lastSync } },
+        { _id: { $nin: remoteIdsArr } },
+        { deletedAt: { $exists: true, $ne: null } },
+      ],
+    })
+    .toArray();
+
+  for (const localDoc of localChanges) {
+    if (await isInDeletionLog(dbs, col, localDoc._id)) {
+      await promoteSoftDeleteToPermanent(
+        dbLocal,
+        dbRemote,
+        col,
+        localDoc,
+        "sync",
+      );
+      continue;
+    }
+
+    const filter = getNaturalKeyFilter(col, localDoc);
+    const remoteDoc = await dbRemote.collection(col).findOne(filter);
+    const { _id, ...localDataWithoutId } = localDoc;
+
+    if (localDoc.deletedAt || (remoteDoc && remoteDoc.deletedAt)) {
+      await promoteSoftDeleteToPermanent(
+        dbLocal,
+        dbRemote,
+        col,
+        localDoc.deletedAt ? localDoc : remoteDoc,
+        localDoc.deletedBy || remoteDoc?.deletedBy || "sync",
+      );
+      continue;
+    }
+
+    if (
+      !remoteDoc ||
+      new Date(localDoc.updatedAt || 0) > new Date(remoteDoc.updatedAt || 0)
+    ) {
+      await dbRemote
+        .collection(col)
+        .updateOne(filter, { $set: localDataWithoutId }, { upsert: true });
+    }
+  }
+
+  const activeFilter = {
+    $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
+  };
+  const [localCount, remoteCount] = await Promise.all([
+    dbLocal.collection(col).countDocuments(activeFilter),
+    dbRemote.collection(col).countDocuments(activeFilter),
+  ]);
+
+  let syncedAt = null;
+  if (localCount === remoteCount) {
+    syncedAt = now;
+    await setLastSync(dbLocal, col, syncedAt);
+  }
+
+  return {
+    collection: col,
+    localCount,
+    remoteCount,
+    lastSync: syncedAt,
+    inSync: localCount === remoteCount,
+  };
+}
+
 // POST /api/sync
 exports.syncCollections = async (req, res) => {
   if (!assertDesktopSyncAvailable(res)) return;
   const { collection } = req.body;
   try {
-    const { dbLocal, dbRemote } = await getDatabases();
-    const dbs = { dbLocal, dbRemote };
+    const { dbLocal, dbRemote } = await ensureRemoteForSync();
 
-    // Apply permanent deletion log first so deleted docs are never restored.
     await applyDeletionLog(dbLocal, dbRemote);
 
-    let collections = collection ? [collection] : await getUserCollections(dbLocal);
+    const collections = collection
+      ? [collection]
+      : await getUserCollections(dbLocal);
     const results = [];
 
     for (const col of collections) {
-      try {
-        if (["attendances", "productstats"].includes(col)) {
-          const { localCount, remoteCount, lastSync } =
-            await fullSyncByNaturalKey(col, dbLocal, dbRemote);
-          results.push({ collection: col, localCount, remoteCount, lastSync });
-          continue;
-        }
-
-        const lastSync = await getLastSync(dbLocal, col);
-        const now = new Date();
-
-        const remoteIdsArr = await dbRemote.collection(col).distinct("_id");
-        const localIdsArr = await dbLocal.collection(col).distinct("_id");
-
-        const remoteChanges = await dbRemote
-          .collection(col)
-          .find({
-            $or: [
-              { updatedAt: { $gt: lastSync } },
-              { _id: { $nin: localIdsArr } },
-              { deletedAt: { $exists: true, $ne: null } },
-            ],
-          })
-          .toArray();
-
-        for (const remoteDoc of remoteChanges) {
-          if (await isInDeletionLog(dbs, col, remoteDoc._id)) {
-            await promoteSoftDeleteToPermanent(
-              dbLocal,
-              dbRemote,
-              col,
-              remoteDoc,
-              "sync",
-            );
-            continue;
-          }
-
-          const filter = getNaturalKeyFilter(col, remoteDoc);
-          const localDoc = await dbLocal.collection(col).findOne(filter);
-          const { _id, ...remoteDataWithoutId } = remoteDoc;
-
-          if (remoteDoc.deletedAt || (localDoc && localDoc.deletedAt)) {
-            await promoteSoftDeleteToPermanent(
-              dbLocal,
-              dbRemote,
-              col,
-              remoteDoc.deletedAt ? remoteDoc : localDoc,
-              (remoteDoc.deletedBy || localDoc?.deletedBy || "sync"),
-            );
-            continue;
-          }
-
-          if (
-            !localDoc ||
-            new Date(remoteDoc.updatedAt || 0) >
-              new Date(localDoc.updatedAt || 0)
-          ) {
-            await dbLocal
-              .collection(col)
-              .updateOne(filter, { $set: remoteDataWithoutId }, { upsert: true });
-          }
-        }
-
-        const localChanges = await dbLocal
-          .collection(col)
-          .find({
-            $or: [
-              { updatedAt: { $gt: lastSync } },
-              { _id: { $nin: remoteIdsArr } },
-              { deletedAt: { $exists: true, $ne: null } },
-            ],
-          })
-          .toArray();
-
-        for (const localDoc of localChanges) {
-          if (await isInDeletionLog(dbs, col, localDoc._id)) {
-            await promoteSoftDeleteToPermanent(
-              dbLocal,
-              dbRemote,
-              col,
-              localDoc,
-              "sync",
-            );
-            continue;
-          }
-
-          const filter = getNaturalKeyFilter(col, localDoc);
-          const remoteDoc = await dbRemote.collection(col).findOne(filter);
-          const { _id, ...localDataWithoutId } = localDoc;
-
-          if (localDoc.deletedAt || (remoteDoc && remoteDoc.deletedAt)) {
-            await promoteSoftDeleteToPermanent(
-              dbLocal,
-              dbRemote,
-              col,
-              localDoc.deletedAt ? localDoc : remoteDoc,
-              (localDoc.deletedBy || remoteDoc?.deletedBy || "sync"),
-            );
-            continue;
-          }
-
-          if (
-            !remoteDoc ||
-            new Date(localDoc.updatedAt || 0) >
-              new Date(remoteDoc.updatedAt || 0)
-          ) {
-            await dbRemote
-              .collection(col)
-              .updateOne(filter, { $set: localDataWithoutId }, { upsert: true });
-          }
-        }
-
-        const activeFilter = {
-          $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
-        };
-        const [localCount, remoteCount] = await Promise.all([
-          dbLocal.collection(col).countDocuments(activeFilter),
-          dbRemote.collection(col).countDocuments(activeFilter),
-        ]);
-
-        let syncedAt = null;
-        if (localCount === remoteCount) {
-          syncedAt = now;
-          await setLastSync(dbLocal, col, syncedAt);
-        }
-
-        results.push({
-          collection: col,
-          localCount,
-          remoteCount,
-          lastSync: syncedAt,
-          inSync: localCount === remoteCount,
-        });
-      } catch (err) {
-        results.push({ collection: col, error: err.message });
-      }
+      results.push(await syncOneCollection(col, dbLocal, dbRemote));
     }
+
     res.json(results);
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    const status = err.code === "REMOTE_DB_UNAVAILABLE" ? 503 : 500;
+    res.status(status).json({
+      message: err.message,
+      code: err.code || undefined,
+    });
   }
 };
 
