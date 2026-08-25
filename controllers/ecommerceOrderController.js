@@ -242,9 +242,9 @@ exports.placeOrder = async (req, res) => {
       : (req.customer ? (req.customer.fullName || req.customer.userName || String(req.customer.phoneNumber) || "customer") : "guest");
     const order = await Order.create({
       items,
-      status: (orderType && String(orderType).toUpperCase() === "STORE_PICKUP")
-        ? "READY FOR STORE PICKUP"
-        : "PLACED",
+      // Both HOME_DELIVERY and STORE_PICKUP start at PLACED so staff
+      // can walk the same ACTION flow (pickup skips delivery steps later).
+      status: "PLACED",
       placedAt: new Date(),
       orderType: ["HOME_DELIVERY", "STORE_PICKUP"].includes((orderType || "").toUpperCase())
         ? (orderType || "").toUpperCase()
@@ -279,7 +279,10 @@ exports.placeOrder = async (req, res) => {
 // ADMIN: update status and auto-invoice on COMPLETED
 exports.updateStatus = async (req, res) => {
   try {
-    if (!req.user || !["admin", "super_admin"].includes(req.user.role)) {
+    if (
+      !req.user ||
+      !["admin", "super_admin", "biller"].includes(req.user.role)
+    ) {
       return res.status(403).json({ success: false, error: "Admin only" });
     }
     const { id } = req.params;
@@ -295,7 +298,15 @@ exports.updateStatus = async (req, res) => {
       .replace(/^OUT_FOR_DELIVERY$/, "OUT FOR DELIVERY")
       .replace(/^OUT-FOR-DELIVERY$/, "OUT FOR DELIVERY");
     const status = normalize(rawStatus);
-    const allowed = ["CONFIRMED", "PACKING", "OUT FOR DELIVERY", "DELIVERED", "COMPLETED", "CANCELLED"];
+    const allowed = [
+      "CONFIRMED",
+      "PACKING",
+      "READY FOR STORE PICKUP",
+      "OUT FOR DELIVERY",
+      "DELIVERED",
+      "COMPLETED",
+      "CANCELLED",
+    ];
     if (!allowed.includes(status)) {
       return res.status(400).json({ success: false, error: "Invalid status" });
     }
@@ -463,7 +474,10 @@ exports.getOrder = async (req, res) => {
 
 exports.listOrders = async (req, res) => {
   try {
-    if (!req.user || !["admin", "super_admin"].includes(req.user.role)) {
+    if (
+      !req.user ||
+      !["admin", "super_admin", "biller"].includes(req.user.role)
+    ) {
       return res.status(403).json({ success: false, error: "Admin only" });
     }
     const {
