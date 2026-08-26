@@ -98,7 +98,6 @@ const startServer = async () => {
     const salaryRoutes = require("./routes/salaryRoutes");
     const ecommerceRoutes = require("./routes/ecommerceRoutes");
     const categoryRoutes = require("./routes/categoryRoutes");
-    const expenseRoutes = require("./routes/expenseRoutes");
     const aiProxyRoutes = require("./routes/aiProxyRoutes");
     const otpValidationRoutes = require("./routes/otpValidationRoutes");
     const messageReminderRoutes = require("./routes/messageReminderRoutes");
@@ -107,7 +106,6 @@ const startServer = async () => {
     app.use("/api/users", userRoutes);
     app.use("/api/customers", customerRoutes);
     app.use("/api/products", productRoutes);
-    app.use("/api/expenses", expenseRoutes);
     app.use("/api/sync", syncRoutes);
     app.use("/api/invoices", invoiceRoutes);
     app.use("/api/stores", storeRoutes);

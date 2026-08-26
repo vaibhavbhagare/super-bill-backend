@@ -90,13 +90,19 @@ router.post("/payments/webhook", ecommercePaymentController.webhook);
 
 // Orders (no server-side cart)
 router.post("/orders/place", optionalAuth, ecommerceOrderController.placeOrder);
+router.get("/orders/dashboard", auth, ecommerceOrderController.getOrderDashboard);
+router.get("/orders/reports", auth, ecommerceOrderController.getOrderReports);
+router.post("/orders/delete-bulk", auth, ecommerceOrderController.deleteOrdersBulk);
 router.get("/orders", auth, ecommerceOrderController.listOrders);
 // Specific customer order routes must be before ":id"
 router.get("/orders/by-customer/:customerId", optionalAuth, ecommerceOrderController.listOrdersByCustomer);
 router.get("/orders/my", auth, ecommerceOrderController.listMyOrders);
 router.get("/orders/:id", auth, ecommerceOrderController.getOrder);
 router.post("/orders/:id/status", auth, ecommerceOrderController.updateStatus);
+router.post("/orders/:id/picking", auth, ecommerceOrderController.updateOrderPicking);
+router.post("/orders/:id/delivery", auth, ecommerceOrderController.updateOrderDelivery);
 router.post("/orders/:id/whatsapp-notify", auth, ecommerceOrderController.dispatchWhatsAppOrderEvent);
 router.post("/orders/:id/cancel", optionalAuth, ecommerceOrderController.cancelOrder);
+router.delete("/orders/:id", auth, ecommerceOrderController.deleteOrder);
 
 module.exports = router;

@@ -8,5 +8,6 @@ router.use(auth);
 
 router.get("/", ReportController.getReport);
 router.get("/product-stats", ReportController.getProductStatsReport);
+router.get("/top-customers", ReportController.getTopCustomers);
 
 module.exports = router;

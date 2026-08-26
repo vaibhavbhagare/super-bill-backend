@@ -1,6 +1,5 @@
 const Invoice = require("../models/Invoice");
 const Product = require("../models/Product");
-const Expense = require("../models/Expense");
 const mongoose = require("mongoose");
 const {
   getStoreDefaultMinStock,
@@ -257,30 +256,6 @@ exports.getReport = async (req, res) => {
     // Execute invoice aggregation
     const [invoiceResult] = await Invoice.aggregate(pipeline).allowDiskUse(true);
 
-    // Build expense filter with same date range and filters
-    const expenseMatch = {
-      $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
-      expenseDate: { $gte: start, $lte: end },
-    };
-
-    // Add billerId filter for expenses if provided (assuming expenses have createdBy field)
-    if (billerId) {
-      expenseMatch.createdBy = billerId;
-    }
-
-    // Execute expense aggregation
-    const expensePipeline = [
-      { $match: expenseMatch },
-      {
-        $group: {
-          _id: null,
-          totalExpense: { $sum: "$amount" },
-        },
-      },
-    ];
-
-    const [expenseResult] = await Expense.aggregate(expensePipeline).allowDiskUse(true);
-
     const lowStockMatch = lowStockFindMatch(storeDefaultMinStock);
     if (billerId) lowStockMatch.createdBy = billerId;
 
@@ -303,7 +278,6 @@ exports.getReport = async (req, res) => {
     return res.json({
       summary: {
         ...(invoiceResult?.summary || { totalSales: 0, totalProfit: 0, totalOrders: 0 }),
-        totalExpense: expenseResult?.totalExpense || 0,
       },
       salesTrend,
       categorySales: invoiceResult?.categorySales || [],
@@ -590,3 +564,82 @@ exports.getProductStatsReport = async (req, res) => {
 };
 
 
+
+/** Top customers ranked by invoice buying amount (for dashboard chart). */
+exports.getTopCustomers = async (req, res) => {
+  try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit || "10", 10), 1), 25);
+    let { startDate, endDate } = req.query;
+
+    const today = new Date();
+    // Default: last 90 days so the chart stays meaningful without filters
+    const defaultStart = new Date(today);
+    defaultStart.setDate(defaultStart.getDate() - 90);
+    defaultStart.setHours(0, 0, 0, 0);
+
+    const start = startDate ? new Date(startDate) : defaultStart;
+    start.setHours(0, 0, 0, 0);
+    const end = endDate ? new Date(endDate) : today;
+    end.setHours(23, 59, 59, 999);
+
+    const rows = await Invoice.aggregate([
+      {
+        $match: {
+          deletedAt: null,
+          createdAt: { $gte: start, $lte: end },
+          customer: { $ne: null },
+        },
+      },
+      {
+        $group: {
+          _id: "$customer",
+          totalAmount: {
+            $sum: {
+              $ifNull: [
+                "$billingSummary.subtotal",
+                { $ifNull: ["$billingSummary.total", 0] },
+              ],
+            },
+          },
+          invoiceCount: { $sum: 1 },
+        },
+      },
+      { $sort: { totalAmount: -1 } },
+      { $limit: limit },
+      {
+        $lookup: {
+          from: "customers",
+          localField: "_id",
+          foreignField: "_id",
+          as: "customer",
+        },
+      },
+      {
+        $unwind: {
+          path: "$customer",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          customerId: "$_id",
+          name: {
+            $ifNull: ["$customer.fullName", "Unknown"],
+          },
+          phoneNumber: "$customer.phoneNumber",
+          totalAmount: { $round: ["$totalAmount", 2] },
+          invoiceCount: 1,
+        },
+      },
+    ]).allowDiskUse(true);
+
+    res.json({
+      dateRange: { start, end },
+      topCustomers: rows,
+    });
+  } catch (error) {
+    console.error("Error fetching top customers:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+};

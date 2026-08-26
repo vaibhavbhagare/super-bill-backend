@@ -16,7 +16,6 @@ const STANDARD = [
   Features.CUSTOMERS_EDIT,
   Features.ORDERS_VIEW,
   Features.SYNC_APP,
-  Features.EXPENSES_VIEW,
 ];
 
 const PREMIUM = [
@@ -28,7 +27,6 @@ const PREMIUM = [
   Features.BILL_DISCOUNT,
   Features.INVOICE_WHATSAPP,
   Features.REPORTS_EXPORT,
-  Features.EXPENSES_MANAGE,
   Features.MESSAGE_REMINDER_VIEW,
   Features.MESSAGE_REMINDER_MANAGE,
   Features.STORE_PROFILE_VIEW,

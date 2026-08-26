@@ -18,6 +18,8 @@ const {
   purgeSoftDeletedRecords,
   isInDeletionLog,
   isMetaCollection,
+  isSyncExcludedCollection,
+  shouldSkipSyncCollection,
 } = require("../services/permanentDeleteService");
 
 function assertDesktopSyncAvailable(res) {
@@ -43,12 +45,12 @@ async function setLastSync(db, collection, time) {
     .updateOne({ collection }, { $set: { lastSync: time } }, { upsert: true });
 }
 
-// Helper: get all collections except system/meta
+// Helper: get all collections except system/meta and online-only (e.g. orders)
 async function getUserCollections(db) {
   const all = await db.listCollections().toArray();
   return all
     .map((c) => c.name)
-    .filter((name) => !isMetaCollection(name));
+    .filter((name) => !shouldSkipSyncCollection(name));
 }
 
 // Helper: natural key per collection for matching documents across databases
@@ -670,6 +672,15 @@ exports.syncCollections = async (req, res) => {
   if (!assertDesktopSyncAvailable(res)) return;
   const { collection } = req.body;
   try {
+    if (collection && isSyncExcludedCollection(collection)) {
+      return res.status(400).json({
+        message:
+          "Orders are online-only and are not synced between local and remote databases.",
+        code: "SYNC_ONLINE_ONLY",
+        collection,
+      });
+    }
+
     const { dbLocal, dbRemote } = await ensureRemoteForSync();
 
     await applyDeletionLog(dbLocal, dbRemote);
@@ -680,6 +691,7 @@ exports.syncCollections = async (req, res) => {
     const results = [];
 
     for (const col of collections) {
+      if (shouldSkipSyncCollection(col)) continue;
       results.push(await syncOneCollection(col, dbLocal, dbRemote));
     }
 

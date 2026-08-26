@@ -25,7 +25,7 @@ const orderTrackingSchema = new mongoose.Schema(
         "CONFIRMED",
         "PACKING",
         "OUT FOR DELIVERY",
-      "READY FOR STORE PICKUP",
+        "READY FOR STORE PICKUP",
         "DELIVERED",
         "COMPLETED",
         "CANCELLED",
@@ -35,6 +35,33 @@ const orderTrackingSchema = new mongoose.Schema(
     note: { type: String },
     at: { type: Date, default: Date.now },
     by: { type: String }, // userName or system
+  },
+  { _id: false },
+);
+
+const orderPickingItemSchema = new mongoose.Schema(
+  {
+    product: { type: mongoose.Schema.Types.ObjectId, ref: "Product" },
+    name: { type: String },
+    quantity: { type: Number, default: 0 },
+    picked: { type: Boolean, default: false },
+    unavailable: { type: Boolean, default: false },
+    note: { type: String },
+    pickedAt: { type: Date },
+    pickedBy: { type: String },
+  },
+  { _id: true },
+);
+
+const orderDeliverySchema = new mongoose.Schema(
+  {
+    assignedTo: { type: String },
+    assignedToName: { type: String },
+    phone: { type: String },
+    vehicle: { type: String },
+    trackingNote: { type: String },
+    assignedAt: { type: Date },
+    assignedBy: { type: String },
   },
   { _id: false },
 );
@@ -87,6 +114,8 @@ const orderSchema = new mongoose.Schema(
     cancelledAt: { type: Date },
     cancelledBy: { type: String },
     cancelledReason: { type: String },
+    picking: [orderPickingItemSchema],
+    delivery: orderDeliverySchema,
     invoice: { type: mongoose.Schema.Types.ObjectId, ref: "Invoice" },
     createdBy: { type: String },
     updatedBy: { type: String },

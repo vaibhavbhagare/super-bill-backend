@@ -259,6 +259,13 @@ exports.placeOrder = async (req, res) => {
         : (customerInfo || {}),
       billingSummary,
       tracking: [{ status: "PLACED", note: "Order placed", by: actorName }],
+      picking: items.map((it) => ({
+        product: it.product,
+        name: it.name,
+        quantity: it.quantity,
+        picked: false,
+        unavailable: false,
+      })),
       channel: "ONLINE",
       createdBy: actorName,
     });
@@ -459,6 +466,15 @@ exports.cancelOrder = async (req, res) => {
 
 exports.getOrder = async (req, res) => {
   try {
+    if (
+      !req.user ||
+      !["admin", "super_admin", "biller"].includes(req.user.role)
+    ) {
+      // customers may also fetch own order elsewhere; keep staff gate for admin portal
+      if (!req.customer) {
+        return res.status(403).json({ success: false, error: "Admin only" });
+      }
+    }
     const { id } = req.params;
     const mongoose = require("mongoose");
     if (!mongoose.Types.ObjectId.isValid(String(id))) {
@@ -466,6 +482,17 @@ exports.getOrder = async (req, res) => {
     }
     const order = await Order.findById(id).populate("items.product");
     if (!order) return res.status(404).json({ success: false, error: "Order not found" });
+    // Ensure picking checklist exists for older orders
+    if (!order.picking || order.picking.length === 0) {
+      order.picking = order.items.map((it) => ({
+        product: it.product?._id || it.product,
+        name: it.name,
+        quantity: it.quantity,
+        picked: false,
+        unavailable: false,
+      }));
+      await order.save();
+    }
     res.json({ success: true, data: order });
   } catch (err) {
     res.status(500).json({ success: false, error: "Failed to fetch order", message: err.message });
@@ -490,17 +517,37 @@ exports.listOrders = async (req, res) => {
       dateTo,
       placedFrom,
       placedTo,
+      orderType,
+      q,
       page = 1,
       limit = 20,
     } = req.query;
 
     const andConditions = [
       { $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }] },
+      { status: { $ne: "CART" } },
     ];
 
     if (status) andConditions.push({ status });
     if (paymentMethod) andConditions.push({ paymentMethod });
     if (paymentStatus) andConditions.push({ paymentStatus });
+    if (orderType) andConditions.push({ orderType: String(orderType).toUpperCase() });
+
+    if (q && String(q).trim()) {
+      const term = String(q).trim();
+      const orSearch = [
+        { "customerSnapshot.fullName": { $regex: term, $options: "i" } },
+        { "items.name": { $regex: term, $options: "i" } },
+      ];
+      const asNumber = Number(term);
+      if (!Number.isNaN(asNumber)) {
+        orSearch.push({ "customerSnapshot.phoneNumber": asNumber });
+      }
+      if (require("mongoose").Types.ObjectId.isValid(term)) {
+        orSearch.push({ _id: term });
+      }
+      andConditions.push({ $or: orSearch });
+    }
 
     // Customer filters
     if (customerId) {
@@ -601,3 +648,405 @@ exports.listMyOrders = async (req, res) => {
 };
 
 
+
+function requireOrderStaff(req, res) {
+  if (
+    !req.user ||
+    !["admin", "super_admin", "biller"].includes(req.user.role)
+  ) {
+    res.status(403).json({ success: false, error: "Admin only" });
+    return false;
+  }
+  return true;
+}
+
+function notDeleted() {
+  return { $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }] };
+}
+
+/** Admin dashboard KPIs for online orders */
+exports.getOrderDashboard = async (req, res) => {
+  try {
+    if (!requireOrderStaff(req, res)) return;
+
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date();
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const pendingStatuses = [
+      "PLACED",
+      "CONFIRMED",
+      "PACKING",
+      "READY FOR STORE PICKUP",
+      "OUT FOR DELIVERY",
+    ];
+
+    const [
+      pendingOrders,
+      todayOrders,
+      todaySalesAgg,
+      salesAgg,
+      recentPending,
+      lowStock,
+    ] = await Promise.all([
+      Order.countDocuments({
+        ...notDeleted(),
+        status: { $in: pendingStatuses },
+      }),
+      Order.countDocuments({
+        ...notDeleted(),
+        status: { $ne: "CART" },
+        createdAt: { $gte: startOfDay, $lte: endOfDay },
+      }),
+      Order.aggregate([
+        {
+          $match: {
+            status: { $nin: ["CART", "CANCELLED"] },
+            $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
+            createdAt: { $gte: startOfDay, $lte: endOfDay },
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            total: { $sum: { $ifNull: ["$billingSummary.subtotal", { $ifNull: ["$billingSummary.total", 0] }] } },
+            count: { $sum: 1 },
+          },
+        },
+      ]),
+      Order.aggregate([
+        {
+          $match: {
+            status: { $in: ["DELIVERED", "COMPLETED"] },
+            $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            total: { $sum: { $ifNull: ["$billingSummary.subtotal", { $ifNull: ["$billingSummary.total", 0] }] } },
+            count: { $sum: 1 },
+          },
+        },
+      ]),
+      Order.find({
+        ...notDeleted(),
+        status: { $in: pendingStatuses },
+      })
+        .sort({ createdAt: -1 })
+        .limit(8)
+        .select("status orderType customerSnapshot billingSummary createdAt paymentStatus paymentMethod"),
+      Product.find({
+        $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
+        minStock: { $ne: null, $gt: 0 },
+        $expr: { $lte: ["$stock", "$minStock"] },
+      })
+        .sort({ stock: 1 })
+        .limit(10)
+        .select("name stock minStock barcode"),
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        sales: {
+          totalRevenue: salesAgg[0]?.total || 0,
+          completedOrders: salesAgg[0]?.count || 0,
+        },
+        today: {
+          orders: todayOrders,
+          revenue: todaySalesAgg[0]?.total || 0,
+        },
+        pendingOrders,
+        lowStock,
+        recentPending,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      error: "Failed to load order dashboard",
+      message: err.message,
+    });
+  }
+};
+
+/** Basic sales / order reports */
+exports.getOrderReports = async (req, res) => {
+  try {
+    if (!requireOrderStaff(req, res)) return;
+    const { dateFrom, dateTo, orderType } = req.query;
+    const match = {
+      status: { $nin: ["CART"] },
+      $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
+    };
+    if (dateFrom || dateTo) {
+      match.createdAt = {};
+      if (dateFrom) match.createdAt.$gte = new Date(dateFrom);
+      if (dateTo) match.createdAt.$lte = new Date(dateTo);
+    }
+    if (orderType) match.orderType = String(orderType).toUpperCase();
+
+    const [byStatus, byPayment, byType, daily, totals] = await Promise.all([
+      Order.aggregate([
+        { $match: match },
+        { $group: { _id: "$status", count: { $sum: 1 }, revenue: { $sum: { $ifNull: ["$billingSummary.subtotal", 0] } } } },
+      ]),
+      Order.aggregate([
+        { $match: match },
+        { $group: { _id: { method: "$paymentMethod", status: "$paymentStatus" }, count: { $sum: 1 }, revenue: { $sum: { $ifNull: ["$billingSummary.subtotal", 0] } } } },
+      ]),
+      Order.aggregate([
+        { $match: match },
+        { $group: { _id: "$orderType", count: { $sum: 1 }, revenue: { $sum: { $ifNull: ["$billingSummary.subtotal", 0] } } } },
+      ]),
+      Order.aggregate([
+        { $match: match },
+        {
+          $group: {
+            _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+            count: { $sum: 1 },
+            revenue: { $sum: { $ifNull: ["$billingSummary.subtotal", 0] } },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ]),
+      Order.aggregate([
+        { $match: match },
+        {
+          $group: {
+            _id: null,
+            orders: { $sum: 1 },
+            revenue: { $sum: { $ifNull: ["$billingSummary.subtotal", 0] } },
+            cancelled: {
+              $sum: { $cond: [{ $eq: ["$status", "CANCELLED"] }, 1, 0] },
+            },
+            completed: {
+              $sum: {
+                $cond: [{ $in: ["$status", ["DELIVERED", "COMPLETED"]] }, 1, 0],
+              },
+            },
+          },
+        },
+      ]),
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        totals: totals[0] || { orders: 0, revenue: 0, cancelled: 0, completed: 0 },
+        byStatus,
+        byPayment,
+        byType,
+        daily,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      error: "Failed to load order reports",
+      message: err.message,
+    });
+  }
+};
+
+/** Update store picking checklist; optionally adjust stock for unavailable items */
+exports.updateOrderPicking = async (req, res) => {
+  try {
+    if (!requireOrderStaff(req, res)) return;
+    const { id } = req.params;
+    const { items } = req.body || {};
+    if (!Array.isArray(items)) {
+      return res.status(400).json({ success: false, error: "items array required" });
+    }
+
+    const order = await Order.findById(id);
+    if (!order) return res.status(404).json({ success: false, error: "Order not found" });
+
+    if (!order.picking || order.picking.length === 0) {
+      order.picking = order.items.map((it) => ({
+        product: it.product,
+        name: it.name,
+        quantity: it.quantity,
+        picked: false,
+        unavailable: false,
+      }));
+    }
+
+    const byId = new Map(
+      items.map((row) => [String(row._id || row.product), row]),
+    );
+    const actor = req.user?.userName || "admin";
+
+    for (const pick of order.picking) {
+      const key = String(pick._id || pick.product);
+      const update = byId.get(key) || byId.get(String(pick.product));
+      if (!update) continue;
+
+      const wasUnavailable = !!pick.unavailable;
+      pick.picked = !!update.picked;
+      pick.unavailable = !!update.unavailable;
+      if (update.note != null) pick.note = String(update.note);
+      if (pick.picked || pick.unavailable) {
+        pick.pickedAt = new Date();
+        pick.pickedBy = actor;
+      }
+
+      // If newly marked unavailable, restock that line (stock was decremented at place)
+      if (!wasUnavailable && pick.unavailable && pick.product) {
+        const qty = Number(pick.quantity || 0);
+        if (qty > 0) {
+          await Product.updateOne(
+            { _id: pick.product },
+            { $inc: { stock: qty }, $set: { updatedAt: new Date() } },
+          );
+        }
+      }
+      // If unavailable cleared, re-decrement stock
+      if (wasUnavailable && !pick.unavailable && pick.product) {
+        const qty = Number(pick.quantity || 0);
+        if (qty > 0) {
+          await Product.updateOne(
+            { _id: pick.product },
+            { $inc: { stock: -qty }, $set: { updatedAt: new Date() } },
+          );
+        }
+      }
+    }
+
+    order.updatedBy = actor;
+    order.markModified("picking");
+    await order.save();
+    res.json({ success: true, data: order });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      error: "Failed to update picking",
+      message: err.message,
+    });
+  }
+};
+
+/** Assign / update delivery tracking */
+exports.updateOrderDelivery = async (req, res) => {
+  try {
+    if (!requireOrderStaff(req, res)) return;
+    const { id } = req.params;
+    const { assignedTo, assignedToName, phone, vehicle, trackingNote } =
+      req.body || {};
+
+    const order = await Order.findById(id);
+    if (!order) return res.status(404).json({ success: false, error: "Order not found" });
+
+    const actor = req.user?.userName || "admin";
+    order.delivery = {
+      ...(order.delivery?.toObject ? order.delivery.toObject() : order.delivery || {}),
+      assignedTo: assignedTo != null ? String(assignedTo) : order.delivery?.assignedTo,
+      assignedToName:
+        assignedToName != null
+          ? String(assignedToName)
+          : order.delivery?.assignedToName,
+      phone: phone != null ? String(phone) : order.delivery?.phone,
+      vehicle: vehicle != null ? String(vehicle) : order.delivery?.vehicle,
+      trackingNote:
+        trackingNote != null ? String(trackingNote) : order.delivery?.trackingNote,
+      assignedAt: new Date(),
+      assignedBy: actor,
+    };
+    order.updatedBy = actor;
+    if (trackingNote) {
+      order.tracking.push({
+        status: order.status,
+        note: `Delivery: ${trackingNote}`,
+        by: actor,
+        at: new Date(),
+      });
+    }
+    await order.save();
+    res.json({ success: true, data: order });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      error: "Failed to update delivery",
+      message: err.message,
+    });
+  }
+};
+
+async function restockOrderItems(order) {
+  // Only restock if order was not already cancelled (cancel already restocked)
+  if (order.status === "CANCELLED") return;
+  for (const item of order.items || []) {
+    const productId = item.product?._id || item.product;
+    const qty = Number(item.quantity || 0);
+    if (!productId || !qty) continue;
+    // Skip lines marked unavailable in picking (already restocked)
+    const pick = (order.picking || []).find(
+      (p) => String(p.product) === String(productId) && p.unavailable,
+    );
+    if (pick) continue;
+    await Product.updateOne(
+      { _id: productId },
+      { $inc: { stock: qty }, $set: { updatedAt: new Date() } },
+    );
+  }
+}
+
+/** Super admin only: permanently delete an order (cleanup / test data) */
+exports.deleteOrder = async (req, res) => {
+  try {
+    if (!req.user || req.user.role !== "super_admin") {
+      return res.status(403).json({ success: false, error: "Super admin only" });
+    }
+    const { id } = req.params;
+    const order = await Order.findById(id);
+    if (!order) return res.status(404).json({ success: false, error: "Order not found" });
+
+    await restockOrderItems(order);
+    await Order.deleteOne({ _id: order._id });
+
+    res.json({
+      success: true,
+      message: "Order permanently deleted",
+      deletedId: String(order._id),
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      error: "Failed to delete order",
+      message: err.message,
+    });
+  }
+};
+
+/** Super admin only: permanently delete many orders */
+exports.deleteOrdersBulk = async (req, res) => {
+  try {
+    if (!req.user || req.user.role !== "super_admin") {
+      return res.status(403).json({ success: false, error: "Super admin only" });
+    }
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+    if (!ids.length) {
+      return res.status(400).json({ success: false, error: "ids array required" });
+    }
+
+    const orders = await Order.find({ _id: { $in: ids } });
+    for (const order of orders) {
+      await restockOrderItems(order);
+    }
+    const result = await Order.deleteMany({ _id: { $in: ids } });
+
+    res.json({
+      success: true,
+      message: "Orders permanently deleted",
+      deletedCount: result.deletedCount || 0,
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      error: "Failed to delete orders",
+      message: err.message,
+    });
+  }
+};

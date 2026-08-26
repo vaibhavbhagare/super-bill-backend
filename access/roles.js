@@ -16,7 +16,6 @@ const BILLER_ALLOWED = [
   Features.REPORTS_VIEW,
   Features.ORDERS_VIEW,
   Features.SYNC_APP,
-  Features.EXPENSES_VIEW,
   Features.STORE_PROFILE_VIEW,
 ];
 

@@ -9,6 +9,21 @@ const META_COLLECTIONS = new Set([
   "system.indexes",
 ]);
 
+/** Live/online-only collections — never local↔remote sync or cross-DB purge. */
+const SYNC_EXCLUDED_COLLECTIONS = new Set(["orders", "payments"]);
+
+function isMetaCollection(name) {
+  return META_COLLECTIONS.has(name);
+}
+
+function isSyncExcludedCollection(name) {
+  return SYNC_EXCLUDED_COLLECTIONS.has(String(name || "").toLowerCase());
+}
+
+function shouldSkipSyncCollection(name) {
+  return isMetaCollection(name) || isSyncExcludedCollection(name);
+}
+
 function currentDb() {
   return mongoose.connection?.db || null;
 }
@@ -158,6 +173,7 @@ async function applyDeletionLog(dbLocal, dbRemote) {
   let applied = 0;
   for (const entry of byKey.values()) {
     const collection = entry.collection;
+    if (shouldSkipSyncCollection(collection)) continue;
     const docId = String(entry.docId);
     const deletedBy = entry.deletedBy || "system";
 
@@ -198,7 +214,20 @@ async function purgeSoftDeletedRecords(collection) {
     ? [collection]
     : (await dbLocal.listCollections().toArray())
         .map((c) => c.name)
-        .filter((name) => !META_COLLECTIONS.has(name));
+        .filter((name) => !shouldSkipSyncCollection(name));
+
+  if (collection && isSyncExcludedCollection(collection)) {
+    return [
+      {
+        collection,
+        skipped: true,
+        reason: "ONLINE_ONLY",
+        localDeletedRemoved: 0,
+        remoteDeletedRemoved: 0,
+        idsPurged: 0,
+      },
+    ];
+  }
 
   const result = [];
   for (const col of collections) {
@@ -247,13 +276,10 @@ async function purgeSoftDeletedRecords(collection) {
   return result;
 }
 
-function isMetaCollection(name) {
-  return META_COLLECTIONS.has(name);
-}
-
 module.exports = {
   DELETIONS_COLLECTION,
   META_COLLECTIONS,
+  SYNC_EXCLUDED_COLLECTIONS,
   toObjectId,
   permanentDeleteById,
   permanentDeleteMany,
@@ -262,6 +288,8 @@ module.exports = {
   purgeSoftDeletedRecords,
   isInDeletionLog,
   isMetaCollection,
+  isSyncExcludedCollection,
+  shouldSkipSyncCollection,
   upsertDeletionRecord,
   hardDeleteById,
 };

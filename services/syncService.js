@@ -1,5 +1,6 @@
 const { MongoClient } = require("mongodb");
 require("dotenv").config();
+const { shouldSkipSyncCollection } = require("./permanentDeleteService");
 
 const localUri = process.env.LOCAL_MONGO_URI;
 const dbName = process.env.LOCAL_DB_NAME || "localDB";
@@ -7,7 +8,6 @@ const models = {
   products: require("../models/Product"),
   users: require("../models/User"),
   customers: require("../models/Customer"),
-  expenses: require("../models/Expense"),
   // add more as needed
 };
 
@@ -28,6 +28,7 @@ async function getAllUnsyncedCounts() {
     const collections = await db.listCollections().toArray();
     const result = {};
     for (const { name } of collections) {
+      if (shouldSkipSyncCollection(name)) continue;
       const count = await db
         .collection(name)
         .countDocuments({ isSynced: false });
