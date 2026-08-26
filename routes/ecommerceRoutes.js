@@ -83,9 +83,11 @@ router.get("/categories",
 
 router.get("/purchases/live", invoiceController.getRecentPurchases);
 
+router.get("/payments", auth, ecommercePaymentController.listAdminTransactions);
+router.get("/payments/by-order/:orderId", requireCustomer, ecommercePaymentController.getByOrder);
+router.get("/payments/:id", auth, ecommercePaymentController.getAdminTransaction);
 router.post("/payments/create-order", requireCustomer, ecommercePaymentController.createOrder);
 router.post("/payments/verify", requireCustomer, ecommercePaymentController.verifyPayment);
-router.get("/payments/by-order/:orderId", requireCustomer, ecommercePaymentController.getByOrder);
 router.post("/payments/webhook", ecommercePaymentController.webhook);
 
 // Orders (no server-side cart)

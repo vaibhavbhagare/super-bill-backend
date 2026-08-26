@@ -337,3 +337,239 @@ exports.webhook = async (req, res) => {
     return res.status(500).json({ success: false, error: "Webhook processing failed." });
   }
 };
+
+function canManagePayments(user) {
+  return user && ["admin", "super_admin", "biller"].includes(user.role);
+}
+
+/** Admin: list all ecommerce payment transactions (+ COD/CASH order payments). */
+exports.listAdminTransactions = async (req, res) => {
+  try {
+    if (!canManagePayments(req.user)) {
+      return res.status(403).json({ success: false, error: "Forbidden" });
+    }
+
+    const page = Math.max(parseInt(req.query.page || "1", 10), 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit || "20", 10), 1), 100);
+    const status = req.query.status ? String(req.query.status).toUpperCase() : "";
+    const method = req.query.method ? String(req.query.method).toUpperCase() : "";
+    const channel = req.query.channel ? String(req.query.channel).toLowerCase() : "";
+    const q = (req.query.q || "").trim();
+    const dateFrom = req.query.dateFrom ? new Date(req.query.dateFrom) : null;
+    const dateTo = req.query.dateTo ? new Date(req.query.dateTo) : null;
+    if (dateFrom) dateFrom.setHours(0, 0, 0, 0);
+    if (dateTo) dateTo.setHours(23, 59, 59, 999);
+
+    const Order = require("../models/Order");
+    const Customer = require("../models/Customer");
+
+    const paymentFilter = {};
+    if (status && ["CREATED", "PAID", "FAILED", "REFUNDED"].includes(status)) {
+      paymentFilter.status = status;
+    }
+    if (channel && ["mobile", "web"].includes(channel)) {
+      paymentFilter.channel = channel;
+    }
+    if (dateFrom || dateTo) {
+      paymentFilter.createdAt = {};
+      if (dateFrom) paymentFilter.createdAt.$gte = dateFrom;
+      if (dateTo) paymentFilter.createdAt.$lte = dateTo;
+    }
+    if (q) {
+      const or = [
+        { razorpayOrderId: { $regex: q, $options: "i" } },
+        { razorpayPaymentId: { $regex: q, $options: "i" } },
+        { receipt: { $regex: q, $options: "i" } },
+        { contact: { $regex: q, $options: "i" } },
+        { email: { $regex: q, $options: "i" } },
+      ];
+      const phoneNum = Number(q);
+      if (!Number.isNaN(phoneNum) && q.length >= 8) {
+        const customers = await Customer.find({
+          phoneNumber: phoneNum,
+        })
+          .select("_id")
+          .lean();
+        if (customers.length) {
+          or.push({ customerId: { $in: customers.map((c) => c._id) } });
+        }
+      }
+      const nameCustomers = await Customer.find({
+        fullName: { $regex: q, $options: "i" },
+      })
+        .select("_id")
+        .limit(50)
+        .lean();
+      if (nameCustomers.length) {
+        or.push({ customerId: { $in: nameCustomers.map((c) => c._id) } });
+      }
+      paymentFilter.$or = or;
+    }
+
+    // Online / Razorpay ledger
+    let paymentRows = [];
+    const includePayments =
+      !method || method === "ONLINE" || method === "RAZORPAY";
+    if (includePayments) {
+      paymentRows = await Payment.find(paymentFilter)
+        .populate("customerId", "fullName phoneNumber")
+        .populate("storeOrderId", "status orderType paymentStatus paymentMethod")
+        .sort({ createdAt: -1 })
+        .lean();
+    }
+
+    // COD / CASH orders that never go through Payment collection
+    let orderRows = [];
+    const includeCodCash = !method || method === "COD" || method === "CASH";
+    if (includeCodCash && (!status || status === "PAID" || status === "UNPAID")) {
+      const orderFilter = {
+        deletedAt: null,
+        status: { $ne: "CART" },
+        paymentMethod: method === "COD" || method === "CASH" ? method : { $in: ["COD", "CASH"] },
+      };
+      if (status === "PAID" || status === "UNPAID") {
+        orderFilter.paymentStatus = status;
+      }
+      if (dateFrom || dateTo) {
+        orderFilter.createdAt = {};
+        if (dateFrom) orderFilter.createdAt.$gte = dateFrom;
+        if (dateTo) orderFilter.createdAt.$lte = dateTo;
+      }
+      if (q) {
+        orderFilter.$or = [
+          { "customerSnapshot.fullName": { $regex: q, $options: "i" } },
+          { "customerSnapshot.phoneNumber": Number.isNaN(Number(q)) ? -1 : Number(q) },
+        ];
+      }
+      orderRows = await Order.find(orderFilter)
+        .sort({ createdAt: -1 })
+        .limit(500)
+        .lean();
+    }
+
+    const fromPayments = paymentRows.map((p) => ({
+      id: String(p._id),
+      source: "payment",
+      createdAt: p.createdAt,
+      paidAt: p.paidAt || null,
+      failedAt: p.failedAt || null,
+      amount: Number(p.amountInPaise || 0) / 100,
+      currency: p.currency || "INR",
+      status: p.status,
+      method: p.method || "ONLINE",
+      paymentMethod: "ONLINE",
+      channel: p.channel || null,
+      orderType: p.orderType || p.storeOrderId?.orderType || null,
+      receipt: p.receipt || null,
+      razorpayOrderId: p.razorpayOrderId || null,
+      razorpayPaymentId: p.razorpayPaymentId || null,
+      failureReason: p.failureReason || null,
+      customer: p.customerId
+        ? {
+            id: String(p.customerId._id || p.customerId),
+            fullName: p.customerId.fullName,
+            phoneNumber: p.customerId.phoneNumber,
+          }
+        : null,
+      orderId: p.storeOrderId
+        ? String(p.storeOrderId._id || p.storeOrderId)
+        : null,
+      orderStatus: p.storeOrderId?.status || null,
+    }));
+
+    const fromOrders = orderRows.map((o) => ({
+      id: `order:${o._id}`,
+      source: "order",
+      createdAt: o.createdAt,
+      paidAt: o.paymentStatus === "PAID" ? o.completedAt || o.updatedAt : null,
+      failedAt: null,
+      amount: Number(o.billingSummary?.subtotal ?? o.billingSummary?.total ?? 0),
+      currency: "INR",
+      status: o.paymentStatus === "PAID" ? "PAID" : "UNPAID",
+      method: o.paymentMethod,
+      paymentMethod: o.paymentMethod,
+      channel: "order",
+      orderType: o.orderType || null,
+      receipt: null,
+      razorpayOrderId: o.razorpayOrderId || null,
+      razorpayPaymentId: o.razorpayPaymentId || null,
+      failureReason: null,
+      customer: o.customerSnapshot
+        ? {
+            id: o.customer ? String(o.customer) : null,
+            fullName: o.customerSnapshot.fullName,
+            phoneNumber: o.customerSnapshot.phoneNumber,
+          }
+        : null,
+      orderId: String(o._id),
+      orderStatus: o.status,
+    }));
+
+    const merged = [...fromPayments, ...fromOrders].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
+
+    const total = merged.length;
+    const start = (page - 1) * limit;
+    const pageRows = merged.slice(start, start + limit);
+
+    const summary = {
+      total,
+      paidCount: merged.filter((r) => r.status === "PAID").length,
+      unpaidCount: merged.filter((r) => r.status === "UNPAID").length,
+      failedCount: merged.filter((r) => r.status === "FAILED").length,
+      createdCount: merged.filter((r) => r.status === "CREATED").length,
+      paidAmount: merged
+        .filter((r) => r.status === "PAID")
+        .reduce((s, r) => s + (Number(r.amount) || 0), 0),
+    };
+
+    return res.json({
+      success: true,
+      data: {
+        transactions: pageRows,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.max(1, Math.ceil(total / limit)),
+        },
+        summary,
+      },
+    });
+  } catch (error) {
+    console.error("listAdminTransactions", error);
+    return res.status(500).json({
+      success: false,
+      error: "Could not load transactions.",
+    });
+  }
+};
+
+exports.getAdminTransaction = async (req, res) => {
+  try {
+    if (!canManagePayments(req.user)) {
+      return res.status(403).json({ success: false, error: "Forbidden" });
+    }
+    const { id } = req.params;
+    if (String(id).startsWith("order:")) {
+      const Order = require("../models/Order");
+      const order = await Order.findById(String(id).slice(6)).lean();
+      if (!order) {
+        return res.status(404).json({ success: false, error: "Not found" });
+      }
+      return res.json({ success: true, data: { source: "order", order } });
+    }
+    const payment = await Payment.findById(id)
+      .populate("customerId", "fullName phoneNumber address")
+      .populate("storeOrderId")
+      .lean();
+    if (!payment) {
+      return res.status(404).json({ success: false, error: "Not found" });
+    }
+    return res.json({ success: true, data: { source: "payment", payment } });
+  } catch (error) {
+    console.error("getAdminTransaction", error);
+    return res.status(500).json({ success: false, error: "Could not load transaction." });
+  }
+};
