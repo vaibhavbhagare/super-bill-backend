@@ -1,6 +1,7 @@
 const cloudinary = require("../middleware/cloudinary");
 const Product = require("../models/Product");
 const Category = require("../models/Category");
+const Store = require("../models/store");
 
 // exports.uploadProductImage = async (req, res) => {
 //   const { productId } = req.params;
@@ -133,6 +134,57 @@ exports.deleteCategoryImage = async (req, res) => {
 
     res.json({
       message: "Category image deleted successfully",
+      version: updated?.updatedAt ?? Date.now(),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Upload store logo
+exports.uploadStoreImage = async (req, res) => {
+  const { storeId } = req.params;
+  try {
+    await cloudinary.uploader.upload(req.file.path, {
+      folder: `stores/${storeId}`,
+      public_id: "main",
+      overwrite: true,
+      invalidate: true,
+      use_filename: false,
+      unique_filename: false,
+    });
+
+    const updated = await Store.findByIdAndUpdate(
+      storeId,
+      { "storeProfile.hasImage": true, updatedAt: new Date() },
+      { new: true }
+    ).lean();
+
+    res.json({
+      message: "Store logo uploaded successfully",
+      version: updated?.updatedAt ?? Date.now(),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Delete store logo
+exports.deleteStoreImage = async (req, res) => {
+  const { storeId } = req.params;
+  try {
+    await cloudinary.uploader.destroy(`stores/${storeId}/main`, {
+      invalidate: true,
+    });
+
+    const updated = await Store.findByIdAndUpdate(
+      storeId,
+      { "storeProfile.hasImage": false, updatedAt: new Date() },
+      { new: true }
+    ).lean();
+
+    res.json({
+      message: "Store logo deleted successfully",
       version: updated?.updatedAt ?? Date.now(),
     });
   } catch (err) {

@@ -13,6 +13,7 @@ router.get("/history", messageReminderController.getReminderHistory);
 
 // Khata Book ledger
 router.get("/khata/summary", khataController.getKhataSummary);
+router.get("/khata/customers/pending-report", khataController.getKhataPendingReport);
 router.get("/khata/customers", khataController.getKhataCustomers);
 router.post("/khata/customers/upsert", khataController.upsertKhataCustomer);
 router.get("/khata/customers/:customerId/transactions", khataController.getKhataTransactions);
