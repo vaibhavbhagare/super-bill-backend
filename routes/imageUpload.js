@@ -12,8 +12,10 @@ router.use(auth); // Apply auth middleware to all routes below
  
 router.post("/upload/:productId", upload.single("image"), imageUploadController.uploadProductImage);
 router.post("/upload/category/:categoryId", upload.single("image"), imageUploadController.uploadCategoryImage);
+router.post("/upload/store/:storeId", upload.single("image"), imageUploadController.uploadStoreImage);
 
 // Delete image
 router.delete("/:productId", imageUploadController.deleteProductImage);
 router.delete("/category/:categoryId", imageUploadController.deleteCategoryImage);
+router.delete("/store/:storeId", imageUploadController.deleteStoreImage);
 module.exports = router;

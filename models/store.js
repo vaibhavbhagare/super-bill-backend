@@ -15,7 +15,7 @@ const storeSchema = new mongoose.Schema(
       isActive: { type: Boolean, default: false },
       storeOwnerName: { type: String, trim: true },
       storeOwnerEmail: { type: String, lowercase: true, trim: true },
-      hasImage: { type: String },
+      hasImage: { type: Boolean, default: false },
     },
 
     printBillSetting: {

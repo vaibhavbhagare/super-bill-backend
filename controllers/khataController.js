@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const Customer = require("../models/Customer");
 const KhataTransaction = require("../models/KhataTransaction");
+const ReminderHistory = require("../models/ReminderHistory");
 const {
   getBalancesByCustomerId,
   getCustomerBalance,
@@ -96,6 +97,131 @@ exports.getKhataSummary = async (_req, res) => {
     });
   } catch (err) {
     console.error("getKhataSummary error:", err);
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+exports.getKhataPendingReport = async (req, res) => {
+  try {
+    const sort = (req.query.sort || "balance_desc").trim();
+    const balanceMap = await getBalancesByCustomerId();
+
+    const customerFilter = {
+      $or: [{ deletedAt: { $exists: false } }, { deletedAt: null }],
+    };
+
+    const customers = await Customer.find(customerFilter).lean();
+
+    const customerIds = customers
+      .filter((c) => (balanceMap.get(String(c._id))?.balance ?? 0) > 0)
+      .map((c) => c._id);
+
+    const [latestPayments, latestNotes, latestReminders] = await Promise.all([
+      KhataTransaction.aggregate([
+        {
+          $match: {
+            ...activeMatch,
+            type: "payment",
+            customerId: { $in: customerIds },
+          },
+        },
+        {
+          $addFields: {
+            effectiveDate: { $ifNull: ["$transactionDate", "$createdAt"] },
+          },
+        },
+        { $sort: { effectiveDate: -1, createdAt: -1 } },
+        {
+          $group: {
+            _id: "$customerId",
+            amount: { $first: "$amount" },
+            paidAt: { $first: "$effectiveDate" },
+          },
+        },
+      ]),
+      KhataTransaction.aggregate([
+        {
+          $match: {
+            ...activeMatch,
+            customerId: { $in: customerIds },
+          },
+        },
+        {
+          $addFields: {
+            effectiveDate: { $ifNull: ["$transactionDate", "$createdAt"] },
+          },
+        },
+        { $sort: { effectiveDate: -1, createdAt: -1 } },
+        {
+          $group: {
+            _id: "$customerId",
+            note: { $first: "$note" },
+          },
+        },
+      ]),
+      ReminderHistory.aggregate([
+        {
+          $match: {
+            customerId: { $in: customerIds },
+          },
+        },
+        { $sort: { sentAt: -1 } },
+        {
+          $group: {
+            _id: "$customerId",
+            sentAt: { $first: "$sentAt" },
+            status: { $first: "$status" },
+          },
+        },
+      ]),
+    ]);
+
+    const paymentMap = new Map(
+      latestPayments.map((row) => [String(row._id), row]),
+    );
+    const noteMap = new Map(latestNotes.map((row) => [String(row._id), row]));
+    const reminderMap = new Map(
+      latestReminders.map((row) => [String(row._id), row]),
+    );
+
+    let rows = customers
+      .map((customer) => {
+        const id = String(customer._id);
+        const stats = balanceMap.get(id);
+        const pendingBalance = stats?.balance ?? 0;
+        if (pendingBalance <= 0) return null;
+
+        const payment = paymentMap.get(id);
+        const noteRow = noteMap.get(id);
+        const reminder = reminderMap.get(id);
+        const note = String(noteRow?.note || "").trim();
+
+        return {
+          _id: id,
+          fullName: customer.fullName,
+          phoneNumber: customer.phoneNumber,
+          pendingBalance,
+          paidNewly: payment?.amount ?? null,
+          paidNewlyAt: payment?.paidAt ?? null,
+          lastReminderAt: reminder?.sentAt ?? null,
+          lastReminderStatus: reminder?.status ?? null,
+          comment: note || null,
+          lastTransactionAt: stats?.lastTransactionAt ?? null,
+        };
+      })
+      .filter(Boolean);
+
+    rows = sortCustomers(rows, sort);
+
+    const { totalPending } = await getTotalPending();
+
+    return res.json({
+      data: rows,
+      total: rows.length,
+      totalPending,
+    });
+  } catch (err) {
+    console.error("getKhataPendingReport error:", err);
     return res.status(500).json({ error: err.message });
   }
 };
