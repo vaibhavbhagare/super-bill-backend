@@ -119,20 +119,16 @@ function resolveCustomerAddress(customer, customerInfo) {
   return null;
 }
 
-async function enrichOrdersWithAddress(orders) {
+async function enrichOrdersWithCustomerProfile(orders) {
   const list = (orders || []).map((o) => (o?.toObject ? o.toObject() : o));
-  const missing = list.filter(
-    (o) =>
-      !(o.customerSnapshot?.address && String(o.customerSnapshot.address).trim()),
-  );
-  if (missing.length === 0) return list;
+  if (list.length === 0) return list;
 
   const ids = [
-    ...new Set(missing.map((o) => customerIdOf(o.customer)).filter(Boolean)),
+    ...new Set(list.map((o) => customerIdOf(o.customer)).filter(Boolean)),
   ];
   const phones = [
     ...new Set(
-      missing
+      list
         .map((o) => normalizePhoneNumber(o.customerSnapshot?.phoneNumber))
         .filter(Boolean),
     ),
@@ -144,7 +140,7 @@ async function enrichOrdersWithAddress(orders) {
   if (orConds.length === 0) return list;
 
   const customers = await Customer.find({ $or: orConds })
-    .select("address addresses phoneNumber")
+    .select("fullName phoneNumber address addresses")
     .lean();
   const byId = new Map(customers.map((c) => [String(c._id), c]));
   const byPhone = new Map(
@@ -152,26 +148,42 @@ async function enrichOrdersWithAddress(orders) {
   );
 
   return list.map((o) => {
-    if (
-      o?.customerSnapshot?.address &&
-      String(o.customerSnapshot.address).trim()
-    ) {
-      return o;
-    }
     const id = customerIdOf(o.customer);
     const phone = normalizePhoneNumber(o.customerSnapshot?.phoneNumber);
     const cust =
       (id && byId.get(id)) ||
       (phone != null ? byPhone.get(String(phone)) : null) ||
       null;
-    const address = resolveCustomerAddress(cust, null);
-    if (!address) return o;
+    if (!cust) return o;
+
+    const address =
+      resolveCustomerAddress(cust, null) ||
+      (o.customerSnapshot?.address && String(o.customerSnapshot.address).trim()) ||
+      undefined;
+    const fullName =
+      (cust.fullName && String(cust.fullName).trim()) ||
+      o.customerSnapshot?.fullName;
+    const phoneNumber =
+      cust.phoneNumber != null
+        ? cust.phoneNumber
+        : o.customerSnapshot?.phoneNumber;
+
     return {
       ...o,
       customer: o.customer || cust?._id,
-      customerSnapshot: { ...(o.customerSnapshot || {}), address },
+      customerSnapshot: {
+        ...(o.customerSnapshot || {}),
+        ...(fullName ? { fullName } : {}),
+        ...(phoneNumber != null ? { phoneNumber } : {}),
+        ...(address ? { address } : {}),
+      },
     };
   });
+}
+
+/** @deprecated use enrichOrdersWithCustomerProfile */
+async function enrichOrdersWithAddress(orders) {
+  return enrichOrdersWithCustomerProfile(orders);
 }
 
 // CART APIs (per-user simple cart backed by an Order with status CART)
@@ -659,7 +671,7 @@ exports.getOrder = async (req, res) => {
       }));
       await order.save();
     }
-    const [enriched] = await enrichOrdersWithAddress([order]);
+    const [enriched] = await enrichOrdersWithCustomerProfile([order]);
     res.json({ success: true, data: enriched });
   } catch (err) {
     res.status(500).json({ success: false, error: "Failed to fetch order", message: err.message });
@@ -793,7 +805,7 @@ exports.listOrders = async (req, res) => {
       Order.find(filter).sort({ createdAt: -1 }).skip(skip).limit(parseInt(limit)),
       Order.countDocuments(filter),
     ]);
-    const enrichedOrders = await enrichOrdersWithAddress(orders);
+    const enrichedOrders = await enrichOrdersWithCustomerProfile(orders);
     res.json({
       success: true,
       data: {

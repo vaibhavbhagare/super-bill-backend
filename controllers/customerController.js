@@ -110,13 +110,54 @@ exports.getCustomerById = async (req, res) => {
   }
 };
 
-// Update
+// Update (local DB + mirror fullName/phone/address to production when dual-DB is configured)
 exports.updateCustomer = async (req, res) => {
   try {
     const updated = await Customer.findByIdAndUpdate(req.params.id, req.body, {
       new: true,
     });
     if (!updated) return res.status(404).json({ error: "Customer not found" });
+
+    // Keep live/orders DB in sync so order pages show the same name as customer table.
+    try {
+      const { tryGetDatabases } = require("../services/dualDb");
+      const { ObjectId } = require("mongodb");
+      const dual = await tryGetDatabases();
+      if (dual?.dbRemote) {
+        const idStr = String(updated._id);
+        const phone = updated.phoneNumber;
+        const setFields = {};
+        if (req.body.fullName != null) setFields.fullName = updated.fullName;
+        if (req.body.phoneNumber != null)
+          setFields.phoneNumber = updated.phoneNumber;
+        if (req.body.address != null) setFields.address = updated.address;
+        if (req.body.addresses != null) setFields.addresses = updated.addresses;
+        if (Object.keys(setFields).length > 0) {
+          setFields.updatedAt = new Date();
+          const filter = ObjectId.isValid(idStr)
+            ? {
+                $or: [
+                  { _id: new ObjectId(idStr) },
+                  ...(phone != null ? [{ phoneNumber: phone }] : []),
+                ],
+              }
+            : phone != null
+              ? { phoneNumber: phone }
+              : null;
+          if (filter) {
+            await dual.dbRemote
+              .collection("customers")
+              .updateMany(filter, { $set: setFields });
+          }
+        }
+      }
+    } catch (syncErr) {
+      console.warn(
+        "Customer update: could not mirror to remote DB:",
+        syncErr?.message || syncErr,
+      );
+    }
+
     res.json(updated);
   } catch (err) {
     res.status(400).json({ error: err.message });
