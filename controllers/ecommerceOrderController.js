@@ -45,6 +45,135 @@ const snapshotItemFromProduct = (product, quantity) => {
   };
 };
 
+/** Build a printable one-line address from string or structured fields. */
+function formatStructuredAddress(addr) {
+  if (!addr) return "";
+  if (typeof addr === "string") return addr.trim();
+  const parts = [
+    addr.name && addr.name !== "Home" ? addr.name : null,
+    addr.addressLine1 || addr.line1 || addr.street,
+    addr.addressLine2 || addr.line2,
+    addr.city,
+    addr.pincode || addr.pinCode || addr.zip,
+    addr.state,
+  ].filter((p) => p != null && String(p).trim() !== "");
+  return parts.join(", ");
+}
+
+function normalizePhoneNumber(value) {
+  if (value == null || value === "") return null;
+  const digits = String(value).replace(/\D/g, "");
+  if (!digits) return null;
+  // Strip leading country code 91 when 12 digits
+  const local =
+    digits.length === 12 && digits.startsWith("91") ? digits.slice(2) : digits;
+  const n = Number(local);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function customerIdOf(ref) {
+  if (!ref) return null;
+  if (typeof ref === "object") {
+    if (ref._id != null) return String(ref._id);
+    return null;
+  }
+  const s = String(ref);
+  if (!s || s === "[object Object]") return null;
+  return s;
+}
+
+/**
+ * Prefer checkout customerInfo (incl. addressId), then shopping-app
+ * addresses[], then legacy customer.address.
+ */
+function resolveCustomerAddress(customer, customerInfo) {
+  if (customerInfo?.addressId && Array.isArray(customer?.addresses)) {
+    const match = customer.addresses.find(
+      (a) => a && String(a._id) === String(customerInfo.addressId),
+    );
+    const fromId = formatStructuredAddress(match);
+    if (fromId) return fromId;
+  }
+
+  const fromInfo =
+    formatStructuredAddress(customerInfo?.address) ||
+    formatStructuredAddress(customerInfo?.deliveryAddress) ||
+    formatStructuredAddress(customerInfo?.shippingAddress) ||
+    formatStructuredAddress({
+      addressLine1: customerInfo?.addressLine1 || customerInfo?.line1,
+      addressLine2: customerInfo?.addressLine2 || customerInfo?.line2,
+      city: customerInfo?.city,
+      pincode: customerInfo?.pincode || customerInfo?.pinCode,
+      state: customerInfo?.state,
+    });
+  if (fromInfo) return fromInfo;
+
+  const list = Array.isArray(customer?.addresses) ? customer.addresses : [];
+  const preferred = list.find((a) => a && a.isDefault) || list[0];
+  const fromList = formatStructuredAddress(preferred);
+  if (fromList) return fromList;
+
+  if (customer?.address && String(customer.address).trim()) {
+    return String(customer.address).trim();
+  }
+  return null;
+}
+
+async function enrichOrdersWithAddress(orders) {
+  const list = (orders || []).map((o) => (o?.toObject ? o.toObject() : o));
+  const missing = list.filter(
+    (o) =>
+      !(o.customerSnapshot?.address && String(o.customerSnapshot.address).trim()),
+  );
+  if (missing.length === 0) return list;
+
+  const ids = [
+    ...new Set(missing.map((o) => customerIdOf(o.customer)).filter(Boolean)),
+  ];
+  const phones = [
+    ...new Set(
+      missing
+        .map((o) => normalizePhoneNumber(o.customerSnapshot?.phoneNumber))
+        .filter(Boolean),
+    ),
+  ];
+
+  const orConds = [];
+  if (ids.length) orConds.push({ _id: { $in: ids } });
+  if (phones.length) orConds.push({ phoneNumber: { $in: phones } });
+  if (orConds.length === 0) return list;
+
+  const customers = await Customer.find({ $or: orConds })
+    .select("address addresses phoneNumber")
+    .lean();
+  const byId = new Map(customers.map((c) => [String(c._id), c]));
+  const byPhone = new Map(
+    customers.map((c) => [String(c.phoneNumber), c]),
+  );
+
+  return list.map((o) => {
+    if (
+      o?.customerSnapshot?.address &&
+      String(o.customerSnapshot.address).trim()
+    ) {
+      return o;
+    }
+    const id = customerIdOf(o.customer);
+    const phone = normalizePhoneNumber(o.customerSnapshot?.phoneNumber);
+    const cust =
+      (id && byId.get(id)) ||
+      (phone != null ? byPhone.get(String(phone)) : null) ||
+      null;
+    const address = resolveCustomerAddress(cust, null);
+    if (!address) return o;
+    return {
+      ...o,
+      customer: o.customer || cust?._id,
+      customerSnapshot: { ...(o.customerSnapshot || {}), address },
+    };
+  });
+}
+
 // CART APIs (per-user simple cart backed by an Order with status CART)
 const getOrCreateCart = async (req) => {
   const actorName = req.user
@@ -143,6 +272,7 @@ exports.placeOrder = async (req, res) => {
       orderType,
       razorpayOrderId,
       razorpayPaymentId,
+      addressId,
     } = req.body;
     if (!Array.isArray(products) || products.length === 0) {
       return res.status(400).json({ success: false, error: "products array required" });
@@ -173,20 +303,48 @@ exports.placeOrder = async (req, res) => {
       items.push(snapshotItemFromProduct(prod, reqItem.quantity));
     }
 
+    const info = {
+      ...(customerInfo || {}),
+      addressId:
+        addressId ||
+        customerInfo?.addressId ||
+        customerInfo?.selectedAddressId ||
+        undefined,
+    };
+    const phone = normalizePhoneNumber(info.phoneNumber);
+
     // Prepare customer (existing or on-the-fly)
     let customer = null;
     if (customerId) {
       customer = await Customer.findById(customerId);
-    } else if (customerInfo && customerInfo.phoneNumber) {
-      customer = await Customer.findOne({ phoneNumber: customerInfo.phoneNumber });
+    }
+    if (!customer && phone) {
+      customer = await Customer.findOne({ phoneNumber: phone });
       if (!customer) {
+        const resolved = resolveCustomerAddress(null, info);
         customer = await Customer.create({
-          phoneNumber: customerInfo.phoneNumber,
-          fullName: customerInfo.fullName || "Guest",
-          address: customerInfo.address || null,
+          phoneNumber: phone,
+          fullName: info.fullName || "Guest",
+          address: resolved,
+          ...(resolved && info.addressLine1
+            ? {
+                addresses: [
+                  {
+                    name: info.addressName || "Home",
+                    addressLine1: info.addressLine1,
+                    addressLine2: info.addressLine2 || null,
+                    city: info.city || "",
+                    pincode: String(info.pincode || info.pinCode || ""),
+                    isDefault: true,
+                  },
+                ],
+              }
+            : {}),
         });
       }
     }
+
+    const resolvedAddress = resolveCustomerAddress(customer, info);
 
     const billingSummary = calculateSummary(items);
     const method = String(paymentMethod || "COD").toUpperCase();
@@ -255,8 +413,16 @@ exports.placeOrder = async (req, res) => {
       razorpayPaymentId: verifiedPayment ? verifiedPayment.razorpayPaymentId : undefined,
       customer: customer ? customer._id : undefined,
       customerSnapshot: customer
-        ? { fullName: customer.fullName, phoneNumber: customer.phoneNumber, address: customer.address }
-        : (customerInfo || {}),
+        ? {
+            fullName: customer.fullName,
+            phoneNumber: customer.phoneNumber,
+            address: resolvedAddress,
+          }
+        : {
+            fullName: info.fullName || "Guest",
+            phoneNumber: phone || info.phoneNumber,
+            address: resolvedAddress,
+          },
       billingSummary,
       tracking: [{ status: "PLACED", note: "Order placed", by: actorName }],
       picking: items.map((it) => ({
@@ -493,7 +659,8 @@ exports.getOrder = async (req, res) => {
       }));
       await order.save();
     }
-    res.json({ success: true, data: order });
+    const [enriched] = await enrichOrdersWithAddress([order]);
+    res.json({ success: true, data: enriched });
   } catch (err) {
     res.status(500).json({ success: false, error: "Failed to fetch order", message: err.message });
   }
@@ -528,7 +695,32 @@ exports.listOrders = async (req, res) => {
       { status: { $ne: "CART" } },
     ];
 
-    if (status) andConditions.push({ status });
+    if (status) {
+      const raw = String(status).trim().toUpperCase();
+      const pendingStatuses = [
+        "PLACED",
+        "CONFIRMED",
+        "PACKING",
+        "READY FOR STORE PICKUP",
+        "OUT FOR DELIVERY",
+      ];
+      if (raw === "PENDING") {
+        andConditions.push({ status: { $in: pendingStatuses } });
+      } else if (raw === "SALES" || raw === "COMPLETED_SALES") {
+        andConditions.push({ status: { $in: ["DELIVERED", "COMPLETED"] } });
+      } else if (String(status).includes(",")) {
+        andConditions.push({
+          status: {
+            $in: String(status)
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean),
+          },
+        });
+      } else {
+        andConditions.push({ status });
+      }
+    }
     if (paymentMethod) andConditions.push({ paymentMethod });
     if (paymentStatus) andConditions.push({ paymentStatus });
     if (orderType) andConditions.push({ orderType: String(orderType).toUpperCase() });
@@ -571,11 +763,19 @@ exports.listOrders = async (req, res) => {
       andConditions.push({ $or: conds });
     }
 
-    // Date filters: createdAt range
+    // Date filters: createdAt range (date-only To includes full local day)
     if (dateFrom || dateTo) {
       const createdRange = {};
-      if (dateFrom) createdRange.$gte = new Date(dateFrom);
-      if (dateTo) createdRange.$lte = new Date(dateTo);
+      if (dateFrom) {
+        const from = new Date(String(dateFrom));
+        if (!String(dateFrom).includes("T")) from.setHours(0, 0, 0, 0);
+        createdRange.$gte = from;
+      }
+      if (dateTo) {
+        const to = new Date(String(dateTo));
+        if (!String(dateTo).includes("T")) to.setHours(23, 59, 59, 999);
+        createdRange.$lte = to;
+      }
       andConditions.push({ createdAt: createdRange });
     }
     // placedAt range
@@ -593,7 +793,18 @@ exports.listOrders = async (req, res) => {
       Order.find(filter).sort({ createdAt: -1 }).skip(skip).limit(parseInt(limit)),
       Order.countDocuments(filter),
     ]);
-    res.json({ success: true, data: { orders, pagination: { currentPage: parseInt(page), total, limit: parseInt(limit) } } });
+    const enrichedOrders = await enrichOrdersWithAddress(orders);
+    res.json({
+      success: true,
+      data: {
+        orders: enrichedOrders,
+        pagination: {
+          currentPage: parseInt(page),
+          total,
+          limit: parseInt(limit),
+        },
+      },
+    });
   } catch (err) {
     res.status(500).json({ success: false, error: "Failed to list orders", message: err.message });
   }
@@ -992,6 +1203,220 @@ async function restockOrderItems(order) {
     );
   }
 }
+
+function productIdOf(item) {
+  return String(item?.product?._id || item?.product || "");
+}
+
+function isPickingUnavailable(order, productId) {
+  return (order.picking || []).some(
+    (p) => String(p.product) === String(productId) && p.unavailable,
+  );
+}
+
+function syncPickingQuantities(order) {
+  const prevByProduct = new Map(
+    (order.picking || []).map((p) => [String(p.product), p]),
+  );
+  order.picking = (order.items || []).map((it) => {
+    const pid = productIdOf(it);
+    const prev = prevByProduct.get(pid);
+    if (prev) {
+      prev.name = it.name;
+      prev.quantity = it.quantity;
+      return prev;
+    }
+    return {
+      product: it.product,
+      name: it.name,
+      quantity: it.quantity,
+      picked: false,
+      unavailable: false,
+    };
+  });
+  order.markModified("picking");
+}
+
+const EDITABLE_ORDER_STATUSES = new Set([
+  "PLACED",
+  "CONFIRMED",
+  "PACKING",
+  "READY FOR STORE PICKUP",
+  "OUT FOR DELIVERY",
+]);
+
+/**
+ * Staff: add / remove / set quantity on order lines.
+ * Body: { action: "add"|"remove"|"setQuantity", productId?, itemId?, quantity? }
+ * Adjusts stock (skips lines already marked unavailable in picking).
+ */
+exports.updateOrderItems = async (req, res) => {
+  try {
+    if (!requireOrderStaff(req, res)) return;
+    const { id } = req.params;
+    const { action, productId, itemId, quantity } = req.body || {};
+    const act = String(action || "").toLowerCase();
+
+    if (!["add", "remove", "setquantity"].includes(act)) {
+      return res.status(400).json({
+        success: false,
+        error: "action must be add, remove, or setQuantity",
+      });
+    }
+
+    const order = await Order.findById(id);
+    if (!order) return res.status(404).json({ success: false, error: "Order not found" });
+
+    if (!EDITABLE_ORDER_STATUSES.has(order.status)) {
+      return res.status(400).json({
+        success: false,
+        error: `Cannot edit items when order is ${order.status}`,
+      });
+    }
+
+    const actor = req.user?.userName || "admin";
+
+    if (act === "add") {
+      if (!productId) {
+        return res.status(400).json({ success: false, error: "productId required" });
+      }
+      const qty = Math.max(1, Number(quantity) || 1);
+      const product = await Product.findOne({ _id: productId, deletedAt: null });
+      if (!product) {
+        return res.status(404).json({ success: false, error: "Product not found" });
+      }
+
+      const existing = (order.items || []).find(
+        (it) => productIdOf(it) === String(product._id),
+      );
+      if (existing) {
+        existing.quantity = Number(existing.quantity || 0) + qty;
+        const unitDiscount = Math.max(
+          (existing.mrp || 0) - (existing.price || 0),
+          0,
+        );
+        existing.discount = existing.quantity * unitDiscount;
+        existing.subtotal = existing.quantity * (existing.price || 0);
+      } else {
+        order.items.push(snapshotItemFromProduct(product, qty));
+      }
+
+      if (!isPickingUnavailable(order, product._id)) {
+        await Product.updateOne(
+          { _id: product._id },
+          { $inc: { stock: -qty }, $set: { updatedAt: new Date() } },
+        );
+      }
+
+      order.tracking.push({
+        status: order.status,
+        note: `Added ${qty}× ${product.name}`,
+        by: actor,
+        at: new Date(),
+      });
+    } else if (act === "remove") {
+      if (!itemId && !productId) {
+        return res.status(400).json({
+          success: false,
+          error: "itemId or productId required",
+        });
+      }
+      const idx = (order.items || []).findIndex((it) => {
+        if (itemId && String(it._id) === String(itemId)) return true;
+        if (productId && productIdOf(it) === String(productId)) return true;
+        return false;
+      });
+      if (idx < 0) {
+        return res.status(404).json({ success: false, error: "Item not found" });
+      }
+      if ((order.items || []).length <= 1) {
+        return res.status(400).json({
+          success: false,
+          error: "Order must keep at least one item",
+        });
+      }
+
+      const [removed] = order.items.splice(idx, 1);
+      const pid = productIdOf(removed);
+      const qty = Number(removed.quantity || 0);
+      if (pid && qty > 0 && !isPickingUnavailable(order, pid)) {
+        await Product.updateOne(
+          { _id: pid },
+          { $inc: { stock: qty }, $set: { updatedAt: new Date() } },
+        );
+      }
+
+      order.tracking.push({
+        status: order.status,
+        note: `Removed ${qty}× ${removed.name}`,
+        by: actor,
+        at: new Date(),
+      });
+    } else {
+      // setQuantity
+      if (!itemId && !productId) {
+        return res.status(400).json({
+          success: false,
+          error: "itemId or productId required",
+        });
+      }
+      const newQty = Number(quantity);
+      if (!Number.isFinite(newQty) || newQty < 1) {
+        return res.status(400).json({
+          success: false,
+          error: "quantity must be at least 1",
+        });
+      }
+      const item = (order.items || []).find((it) => {
+        if (itemId && String(it._id) === String(itemId)) return true;
+        if (productId && productIdOf(it) === String(productId)) return true;
+        return false;
+      });
+      if (!item) {
+        return res.status(404).json({ success: false, error: "Item not found" });
+      }
+
+      const oldQty = Number(item.quantity || 0);
+      const delta = newQty - oldQty;
+      item.quantity = newQty;
+      const unitDiscount = Math.max((item.mrp || 0) - (item.price || 0), 0);
+      item.discount = newQty * unitDiscount;
+      item.subtotal = newQty * (item.price || 0);
+
+      const pid = productIdOf(item);
+      if (pid && delta !== 0 && !isPickingUnavailable(order, pid)) {
+        await Product.updateOne(
+          { _id: pid },
+          { $inc: { stock: -delta }, $set: { updatedAt: new Date() } },
+        );
+      }
+
+      order.tracking.push({
+        status: order.status,
+        note: `Qty ${item.name}: ${oldQty} → ${newQty}`,
+        by: actor,
+        at: new Date(),
+      });
+    }
+
+    order.billingSummary = calculateSummary(order.items);
+    syncPickingQuantities(order);
+    order.updatedBy = actor;
+    order.markModified("items");
+    order.markModified("billingSummary");
+    await order.save();
+
+    const populated = await Order.findById(order._id).populate("items.product");
+    const [enriched] = await enrichOrdersWithAddress([populated]);
+    res.json({ success: true, data: enriched });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      error: "Failed to update order items",
+      message: err.message,
+    });
+  }
+};
 
 /** Super admin only: permanently delete an order (cleanup / test data) */
 exports.deleteOrder = async (req, res) => {

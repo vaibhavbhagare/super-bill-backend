@@ -22,7 +22,7 @@ RATE_LIMIT_SLEEP_S = 5
 ERROR_BACKOFF_S = 10
 CATEGORIES_COLLECTION = "categories"
 # MongoDB product.categories is an array; Gemini may return several ids (cap for safety).
-MAX_CATEGORY_IDS_PER_PRODUCT = 8
+MAX_CATEGORY_IDS_PER_PRODUCT = 3
 NOT_DELETED = {"$or": [{"deletedAt": None}, {"deletedAt": {"$exists": False}}]}
 
 
@@ -59,6 +59,15 @@ def _load_category_catalog(db: Any) -> Tuple[List[Dict[str, Any]], Set[str]]:
     return catalog, allowed
 
 
+_WEIGHT_OR_UNIT_TOKEN = re.compile(
+    r"^(?:"
+    r"\d+(?:[./]\d+)?(?:gm|g|kg|ml|l|ltr|litre|liter|pcs|pc)?"
+    r"|gm|g|kg|ml|l|ltr|litre|liter|pcs|pc|pack|pkt"
+    r")$",
+    re.IGNORECASE,
+)
+
+
 def _search_key_tokens(raw: Any) -> List[str]:
     """Split a searchKey string into trimmed tokens (comma / semicolon / pipe)."""
     if raw is None:
@@ -69,16 +78,47 @@ def _search_key_tokens(raw: Any) -> List[str]:
     return [p.strip() for p in re.split(r"[,;|]+", s) if p.strip()]
 
 
-def _merge_search_key(new_value: Any, old_value: Any) -> str:
-    """Gemini keywords first, then unique existing tokens (case-insensitive)."""
+def _merge_search_key(*parts: Any) -> str:
+    """Keep first occurrence of each token (case-insensitive) across parts, in given order."""
     seen: Set[str] = set()
     out: List[str] = []
-    for token in _search_key_tokens(new_value) + _search_key_tokens(old_value):
-        key = token.casefold()
-        if key not in seen:
-            seen.add(key)
-            out.append(token)
+    for part in parts:
+        tokens = part if isinstance(part, list) else _search_key_tokens(part)
+        for token in tokens:
+            key = token.casefold()
+            if key and key not in seen:
+                seen.add(key)
+                out.append(token)
     return ", ".join(out)
+
+
+def _significant_name_tokens(name: Any) -> List[str]:
+    """Brand / product words from a name, ignoring pack size and units."""
+    if not name:
+        return []
+    parts = re.findall(r"[A-Za-z\u0900-\u097F]+|\d+[A-Za-z]*", str(name))
+    return [p for p in parts if not _WEIGHT_OR_UNIT_TOKEN.match(p)]
+
+
+def _choose_display_name(ai_name: Any, old_name: Any) -> str:
+    """
+    Allow formatting / extra words, but never drop original identity tokens.
+    e.g. 'Dale 250gm' must keep 'Dale' — 'Chana Dal 250gm' is rejected.
+    """
+    old = str(old_name or "").strip()
+    new = str(ai_name or "").strip()
+    if not new:
+        return old
+    if not old:
+        return new
+    for token in _significant_name_tokens(old):
+        if not re.search(
+            rf"(?<![A-Za-z\u0900-\u097F]){re.escape(token)}(?![A-Za-z\u0900-\u097F])",
+            new,
+            flags=re.IGNORECASE,
+        ):
+            return old
+    return new
 
 
 def _parse_category_ids(value: Any, allowed: Set[str]) -> List[ObjectId]:
@@ -97,18 +137,22 @@ def _parse_category_ids(value: Any, allowed: Set[str]) -> List[ObjectId]:
     return out
 
 
-def _build_prompt_inputs_from_products(batch: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _build_prompt_inputs_from_products(
+    batch: List[Dict[str, Any]],
+    catalog: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
     """
     One object per product: always `name` (English preferred, else Marathi as fallback label).
-    Optional `existingSecondName` / `existingSearchKey` when present in DB (not duplicated as hints).
-    Optional `existingCategoryIds`: current category ObjectIds as strings for AI to refine.
+    Optional `existingSecondName` / `existingSearchKey` when present in DB.
+    Optional `existingCategories`: current categories with names so the model can keep or replace them.
     """
+    catalog_by_id = {c["id"]: c for c in (catalog or []) if c.get("id")}
     items: List[Dict[str, Any]] = []
     for p in batch:
         name_en = (p.get("name") or "").strip()
         sec = str(p.get("secondName") or "").strip()
         name = name_en or sec
-        item: Dict[str, Any] = {"name": name}
+        item: Dict[str, Any] = {"name": name, "existingName": name}
         if sec and name_en:
             item["existingSecondName"] = sec
         sk_raw = p.get("searchKey")
@@ -116,13 +160,30 @@ def _build_prompt_inputs_from_products(batch: List[Dict[str, Any]]) -> List[Dict
         if sk:
             item["existingSearchKey"] = sk
         cat_ids: List[str] = []
+        existing_cats: List[Dict[str, Any]] = []
         for c in p.get("categories") or []:
             if isinstance(c, ObjectId):
-                cat_ids.append(str(c))
+                cid = str(c)
             elif c is not None:
-                cat_ids.append(str(c).strip())
+                cid = str(c).strip()
+            else:
+                continue
+            if not cid:
+                continue
+            cat_ids.append(cid)
+            row = catalog_by_id.get(cid)
+            if row:
+                existing_cats.append(
+                    {
+                        "id": cid,
+                        "name": row.get("name") or "",
+                        "secondaryName": row.get("secondaryName"),
+                    }
+                )
         if cat_ids:
             item["existingCategoryIds"] = cat_ids
+        if existing_cats:
+            item["existingCategories"] = existing_cats
         items.append(item)
     return items
 
@@ -143,33 +204,41 @@ def _prompt_for_product_batch(
 AUTHORIZED CATEGORIES (copy each "id" exactly into categoryIds — never invent ids):
 {cat_json}
 
-6. 'categoryIds': JSON array of MongoDB category id strings from AUTHORIZED CATEGORIES. Each product may have **multiple** categories — output **all** ids that reasonably apply (do not limit yourself to one). Use several ids when the product fits more than one aisle or theme (e.g. tea → beverages + daily grocery). Cap: at most {MAX_CATEGORY_IDS_PER_PRODUCT} ids per product. Use name and secondaryName (Marathi) to match. Use [] only when no catalog category fits. If the input has "existingCategoryIds", keep those that still fit and add or replace from the catalog as needed.
+6. 'categoryIds': Identify the product FIRST from the Marathi/Hinglish shop name, then pick categories that match THAT meaning only.
+   - Prefer **1** category. Add extra ids only when the same physical item clearly belongs in another aisle. Cap: at most {MAX_CATEGORY_IDS_PER_PRODUCT}.
+   - Do NOT dump extra food/snack/bakery/mukwas/grocery ids onto a non-food item.
+   - Example: "katri" = scissors (कात्री) → stationery / hardware / household tools — NEVER mukwas, bakery, or snacks.
+   - If you are not sure what the product is, keep existingCategoryIds as-is (or [] if none). Do not guess.
+   - If existing categories do not match the identified product, replace them with the correct catalog ids.
 """
     else:
         category_block = """
 6. 'categoryIds': Always use [] — no category catalog was loaded from the database for this run.
 """
 
-    return f"""Act as a Retail Data Specialist for an Indian Supermarket.
-Your goal is to optimize product metadata for both a physical POS system and an E-commerce web app.
+    return f"""Act as a Retail Data Specialist for an Indian supermarket whose staff name products in **Marathi / Hinglish** (how customers will search).
+
+BEFORE writing any field: interpret the shop name as a Marathi/Indian local word (or brand), then enrich. Do not guess from English look-alikes.
 
 Input products from our database (in order — produce one result per entry, same order).
 Each object includes:
-- "name" (required): primary product name from the system. Use this as the default source when other fields are missing.
-- "existingSecondName" (optional): current Marathi name in DB if any — refine it for natural local wording; align with the corrected English "name".
-- "existingSearchKey" (optional): current search keywords in DB if any — generate new English + Hinglish tokens; the API will append the old searchKey after yours.
-- "existingCategoryIds" (optional): current category MongoDB ids — refine against AUTHORIZED CATEGORIES when that list is provided below.
+- "name" / "existingName" (required): the CURRENT shop name. Customers will type this exact spelling to search. Keep that identity.
+- "existingSecondName" (optional): current Marathi name in DB if any.
+- "existingSearchKey" (optional): keywords the shop already uses for search. The API prepends old name + these keys before yours.
+- "existingCategories" / "existingCategoryIds" (optional): current categories (with names). Keep only if they match the real product.
 
-When "existingSecondName" or "existingSearchKey" are absent, infer "secondName" and "searchKey" only from "name".
+When "existingSecondName" or "existingSearchKey" are absent, infer from existingName after you understand the Marathi meaning.
 
 {payload}
 
 Tasks (for EACH input object above):
-1. 'name': Correct the English name. Capitalize properly. Include Brand, Product, and Weight/Size (e.g., "Tata Tea Gold 500g").
-2. 'secondName': Provide the name in Marathi script. Ensure it sounds natural for a local customer (e.g., "टाटा टी गोल्ड ५०० ग्रॅम").
-3. 'searchKey': Generate 5-7 new comma-separated keywords in English and Hinglish (e.g., "tea, chai, tata tea, bhukri, morning tea"). Do not drop this field; existing keywords are merged in code.
-4. 'description': Write a 2-sentence English description. Focus on quality, usage, and shelf-life or taste. Use a professional e-commerce tone.
-5. 'secondaryDescription': Write the same description in Marathi. Ensure it is persuasive for local shoppers.
+0. Identify the product from Marathi/Hinglish (existingName + existingSearchKey). Example: "katri" = scissors (कात्री), not a food item. If unsure, do not invent a different product.
+1. 'name': Keep original shop words EXACTLY (same spelling) so search still works. You may capitalize, fix spacing, keep pack size, and ADD a short English meaning in parentheses if it helps (e.g. "Katri (Scissor)"). Never replace a local word with a similar English grocery word.
+   HARD RULE: Dale ≠ Dal. katri ≠ a snack. Do not "correct" Marathi names into unrelated English products.
+2. 'secondName': Marathi script for the SAME product (e.g. "कात्री" for katri), natural for local search.
+3. 'searchKey': Only NEW extra keywords (English meaning, Hinglish, Marathi) that match the identified product. Do not repeat the old name/old keys; code saves: old name, old searchKey, then yours. Example extras for katri: "scissor, scissors, कात्री, cutter".
+4. 'description': 2-sentence English description of the IDENTIFIED product (not a guessed food item).
+5. 'secondaryDescription': Same description in Marathi.
 {category_block}
 Output requirement:
 Return ONLY a valid JSON array. Length must equal the number of input objects. Each element must be exactly this shape:
@@ -292,7 +361,7 @@ def run_gemini_enrichment(
 
     for i in range(0, len(products), BATCH_SIZE):
         batch = products[i : i + BATCH_SIZE]
-        input_items = _build_prompt_inputs_from_products(batch)
+        input_items = _build_prompt_inputs_from_products(batch, category_catalog)
         prompt = _prompt_for_product_batch(input_items, category_catalog)
 
         try:
@@ -317,12 +386,15 @@ def run_gemini_enrichment(
 
             for index, data in enumerate(ai_results):
                 pid = batch[index]["_id"]
+                old_name = batch[index].get("name")
+                chosen_name = _choose_display_name(data.get("name"), old_name)
                 update_fields = {
-                    "name": data.get("name"),
+                    "name": chosen_name,
                     "secondName": data.get("secondName"),
                     "searchKey": _merge_search_key(
-                        data.get("searchKey"),
+                        str(old_name or "").strip(),
                         batch[index].get("searchKey"),
+                        data.get("searchKey"),
                     ),
                     "description": data.get("description"),
                     "secondaryDescription": data.get("secondaryDescription"),
@@ -330,10 +402,12 @@ def run_gemini_enrichment(
                     "updatedAt": datetime.now(timezone.utc),
                 }
                 if allowed_category_ids:
-                    update_fields["categories"] = _parse_category_ids(
+                    parsed_categories = _parse_category_ids(
                         data.get("categoryIds"),
                         allowed_category_ids,
                     )
+                    if parsed_categories:
+                        update_fields["categories"] = parsed_categories
                 doc_after = coll.find_one_and_update(
                     {"_id": pid, **NOT_DELETED},
                     {"$set": update_fields},
