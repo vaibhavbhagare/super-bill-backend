@@ -272,8 +272,12 @@ const dispatchOrderNotification = async (eventId, order, metadata = {}) => {
   return { skipped: true, reason: "unknown_audience" };
 };
 
-const scheduleNotify = (fn) => {
-  Promise.resolve().then(fn).catch((err) => console.error("[order WhatsApp]", err?.message || err));
+const scheduleNotify = async (fn) => {
+  try {
+    await Promise.resolve().then(fn);
+  } catch (err) {
+    console.error("[order WhatsApp]", err?.message || err);
+  }
 };
 
 const onOrderPlaced = async (order) => {

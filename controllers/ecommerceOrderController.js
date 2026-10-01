@@ -4,6 +4,9 @@ const Customer = require("../models/Customer");
 const Invoice = require("../models/Invoice");
 const Payment = require("../models/Payment");
 const orderWhatsApp = require("../services/whatsappOrderNotificationService");
+const {
+  normalizePhoneNumber: toWhatsAppPhone,
+} = require("./whatsappService");
 
 // Helpers: generate a unique-ish online invoice number
 function generateOnlineInvoiceNumber() {
@@ -58,6 +61,21 @@ function formatStructuredAddress(addr) {
     addr.state,
   ].filter((p) => p != null && String(p).trim() !== "");
   return parts.join(", ");
+}
+
+function isPlaceholderCustomerName(name) {
+  const n = String(name || "")
+    .trim()
+    .toLowerCase();
+  return !n || n === "guest" || n === "customer";
+}
+
+function resolveOrderCustomerName(info, customer) {
+  const fromInfo = String(info?.fullName || "").trim();
+  const fromCustomer = String(customer?.fullName || "").trim();
+  if (!isPlaceholderCustomerName(fromInfo)) return fromInfo;
+  if (!isPlaceholderCustomerName(fromCustomer)) return fromCustomer;
+  return fromInfo || fromCustomer || "Guest";
 }
 
 function normalizePhoneNumber(value) {
@@ -336,7 +354,7 @@ exports.placeOrder = async (req, res) => {
         const resolved = resolveCustomerAddress(null, info);
         customer = await Customer.create({
           phoneNumber: phone,
-          fullName: info.fullName || "Guest",
+          fullName: resolveOrderCustomerName(info, null),
           address: resolved,
           ...(resolved && info.addressLine1
             ? {
@@ -357,6 +375,17 @@ exports.placeOrder = async (req, res) => {
     }
 
     const resolvedAddress = resolveCustomerAddress(customer, info);
+    const resolvedFullName = resolveOrderCustomerName(info, customer);
+
+    // Persist real name when OTP signup left "Guest"
+    if (
+      customer &&
+      !isPlaceholderCustomerName(resolvedFullName) &&
+      isPlaceholderCustomerName(customer.fullName)
+    ) {
+      customer.fullName = resolvedFullName;
+      await customer.save();
+    }
 
     const billingSummary = calculateSummary(items);
     const method = String(paymentMethod || "COD").toUpperCase();
@@ -410,6 +439,23 @@ exports.placeOrder = async (req, res) => {
     const actorName = req.user
       ? req.user.userName
       : (req.customer ? (req.customer.fullName || req.customer.userName || String(req.customer.phoneNumber) || "customer") : "guest");
+    const orderCustomerName = resolveOrderCustomerName(info, customer);
+    if (
+      customer &&
+      !isPlaceholderCustomerName(orderCustomerName) &&
+      isPlaceholderCustomerName(customer.fullName)
+    ) {
+      customer.fullName = orderCustomerName;
+      try {
+        await customer.save();
+      } catch (err) {
+        console.warn(
+          "placeOrder: could not update customer fullName:",
+          err?.message || err,
+        );
+      }
+    }
+
     const order = await Order.create({
       items,
       // Both HOME_DELIVERY and STORE_PICKUP start at PLACED so staff
@@ -426,13 +472,20 @@ exports.placeOrder = async (req, res) => {
       customer: customer ? customer._id : undefined,
       customerSnapshot: customer
         ? {
-            fullName: customer.fullName,
-            phoneNumber: customer.phoneNumber,
+            fullName: orderCustomerName,
+            // Prefer 10-digit string so WhatsApp templates never get bad_phone
+            phoneNumber:
+              toWhatsAppPhone(customer.phoneNumber) ||
+              customer.phoneNumber,
             address: resolvedAddress,
           }
         : {
-            fullName: info.fullName || "Guest",
-            phoneNumber: phone || info.phoneNumber,
+            fullName: orderCustomerName,
+            phoneNumber:
+              toWhatsAppPhone(phone) ||
+              toWhatsAppPhone(info.phoneNumber) ||
+              phone ||
+              info.phoneNumber,
             address: resolvedAddress,
           },
       billingSummary,
@@ -453,7 +506,10 @@ exports.placeOrder = async (req, res) => {
       await verifiedPayment.save();
     }
 
-    orderWhatsApp.scheduleOrderWhatsApp(() => orderWhatsApp.onOrderPlaced(order.toObject ? order.toObject() : order));
+    // Await WhatsApp before responding — fire-and-forget dies on Vercel before Twilio runs.
+    await orderWhatsApp.scheduleOrderWhatsApp(() =>
+      orderWhatsApp.onOrderPlaced(order.toObject ? order.toObject() : order),
+    );
 
   res.json({ success: true, data: order });
   } catch (err) {
@@ -563,7 +619,7 @@ exports.updateStatus = async (req, res) => {
     await order.save();
 
     const orderPlain = order.toObject ? order.toObject() : order;
-    orderWhatsApp.scheduleOrderWhatsApp(() =>
+    await orderWhatsApp.scheduleOrderWhatsApp(() =>
       orderWhatsApp.onOrderStatusUpdated(orderPlain, status, {
         previousStatus,
         orderWhatsAppExtras,
@@ -600,7 +656,7 @@ exports.dispatchWhatsAppOrderEvent = async (req, res) => {
     delete meta.eventId;
     delete meta.event;
 
-    orderWhatsApp.scheduleOrderWhatsApp(() =>
+    await orderWhatsApp.scheduleOrderWhatsApp(() =>
       orderWhatsApp.dispatchOrderNotification(eventId, order.toObject ? order.toObject() : order, meta),
     );
 
@@ -632,7 +688,7 @@ exports.cancelOrder = async (req, res) => {
     }
     await order.save();
 
-    orderWhatsApp.scheduleOrderWhatsApp(() =>
+    await orderWhatsApp.scheduleOrderWhatsApp(() =>
       orderWhatsApp.onOrderCancelled(order.toObject ? order.toObject() : order, { reason: order.cancelledReason }),
     );
 
