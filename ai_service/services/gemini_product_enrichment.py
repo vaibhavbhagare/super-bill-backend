@@ -142,9 +142,8 @@ def _build_prompt_inputs_from_products(
     catalog: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     """
-    One object per product: always `name` (English preferred, else Marathi as fallback label).
-    Optional `existingSecondName` / `existingSearchKey` when present in DB.
-    Optional `existingCategories`: current categories with names so the model can keep or replace them.
+    One object per product: always `name` / `existingName`.
+    Optional secondName, searchKey, brand, description, unit, categories.
     """
     catalog_by_id = {c["id"]: c for c in (catalog or []) if c.get("id")}
     items: List[Dict[str, Any]] = []
@@ -153,12 +152,21 @@ def _build_prompt_inputs_from_products(
         sec = str(p.get("secondName") or "").strip()
         name = name_en or sec
         item: Dict[str, Any] = {"name": name, "existingName": name}
-        if sec and name_en:
+        if sec:
             item["existingSecondName"] = sec
         sk_raw = p.get("searchKey")
         sk = str(sk_raw).strip() if sk_raw is not None else ""
         if sk:
             item["existingSearchKey"] = sk
+        brand = str(p.get("brand") or "").strip()
+        if brand:
+            item["brand"] = brand
+        desc = str(p.get("description") or "").strip()
+        if desc:
+            item["description"] = desc
+        unit = str(p.get("unit") or "").strip()
+        if unit:
+            item["unit"] = unit
         cat_ids: List[str] = []
         existing_cats: List[Dict[str, Any]] = []
         for c in p.get("categories") or []:
@@ -192,59 +200,786 @@ def _prompt_for_product_batch(
     input_items: List[Dict[str, Any]],
     catalog: List[Dict[str, Any]],
 ) -> str:
-    """Retail metadata prompt; model returns a JSON array (one object per input row, same order)."""
+    """Retail + Maharashtra search-optimization prompt; JSON array out, same order."""
     payload = json.dumps(input_items, ensure_ascii=False)
-    output_shape = (
-        '{"name": "", "secondName": "", "searchKey": "", "description": "", '
-        '"secondaryDescription": "", "categoryIds": []}'
-    )
     if catalog:
         cat_json = json.dumps(catalog, ensure_ascii=False)
-        category_block = f"""
-AUTHORIZED CATEGORIES (copy each "id" exactly into categoryIds — never invent ids):
-{cat_json}
-
-6. 'categoryIds': Identify the product FIRST from the Marathi/Hinglish shop name, then pick categories that match THAT meaning only.
-   - Prefer **1** category. Add extra ids only when the same physical item clearly belongs in another aisle. Cap: at most {MAX_CATEGORY_IDS_PER_PRODUCT}.
-   - Do NOT dump extra food/snack/bakery/mukwas/grocery ids onto a non-food item.
-   - Example: "katri" = scissors (कात्री) → stationery / hardware / household tools — NEVER mukwas, bakery, or snacks.
-   - If you are not sure what the product is, keep existingCategoryIds as-is (or [] if none). Do not guess.
-   - If existing categories do not match the identified product, replace them with the correct catalog ids.
-"""
+        category_catalog_block = f"""AUTHORIZED CATEGORIES (copy each "id" exactly into categoryIds — never invent ids):
+{cat_json}"""
     else:
-        category_block = """
-6. 'categoryIds': Always use [] — no category catalog was loaded from the database for this run.
-"""
+        category_catalog_block = (
+            "AUTHORIZED CATEGORIES: none loaded — always use [] for categoryIds."
+        )
 
-    return f"""Act as a Retail Data Specialist for an Indian supermarket whose staff name products in **Marathi / Hinglish** (how customers will search).
+    return f"""Act as a Retail Data Specialist and Product Search Optimization Specialist for an Indian supermarket and e-commerce product catalog.
 
-BEFORE writing any field: interpret the shop name as a Marathi/Indian local word (or brand), then enrich. Do not guess from English look-alikes.
+Our SAME product database is shared by:
 
-Input products from our database (in order — produce one result per entry, same order).
-Each object includes:
-- "name" / "existingName" (required): the CURRENT shop name. Customers will type this exact spelling to search. Keep that identity.
-- "existingSecondName" (optional): current Marathi name in DB if any.
-- "existingSearchKey" (optional): keywords the shop already uses for search. The API prepends old name + these keys before yours.
-- "existingCategories" / "existingCategoryIds" (optional): current categories (with names). Keep only if they match the real product.
+1. E-commerce website
+2. Android shopping application
+3. POS / billing application
+4. Admin product management application
 
-When "existingSecondName" or "existingSearchKey" are absent, infer from existingName after you understand the Marathi meaning.
+Therefore, all generated product information must work for both:
+- Customer product discovery
+- Fast product search in POS/billing/admin
+
+Our customers are primarily from Maharashtra, India.
+
+Customers may search using:
+- Marathi (Devanagari)
+- English
+- Roman Marathi
+- Marathi + English mixed typing
+- Hinglish-style typing commonly used by Marathi customers
+- Local pronunciation-based spellings
+- Common Indian/Maharashtra retail terminology
+
+IMPORTANT:
+Use MARATHI for local-language interpretation.
+
+DO NOT convert Marathi into Hindi.
+
+==================================================
+INPUT
+==================================================
+
+Input products from our database, in order.
+
+Produce exactly one result per input object and preserve the same order.
+
+Each object may include:
+
+- "name" / "existingName" (required):
+  Current shop/product name.
+  Customers may already know and search this exact spelling.
+  Preserve its identity.
+
+- "existingSecondName" (optional):
+  Current Marathi product name in DB.
+
+- "existingSearchKey" (optional):
+  Existing search keywords already used by the shop.
+
+- "existingCategories" / "existingCategoryIds" (optional):
+  Current categories with names/IDs.
+
+- "brand" (optional)
+
+- "description" (optional)
+
+- "unit" (optional)
+
+- Other product information may also be provided.
 
 {payload}
 
-Tasks (for EACH input object above):
-0. Identify the product from Marathi/Hinglish (existingName + existingSearchKey). Example: "katri" = scissors (कात्री), not a food item. If unsure, do not invent a different product.
-1. 'name': Keep original shop words EXACTLY (same spelling) so search still works. You may capitalize, fix spacing, keep pack size, and ADD a short English meaning in parentheses if it helps (e.g. "Katri (Scissor)"). Never replace a local word with a similar English grocery word.
-   HARD RULE: Dale ≠ Dal. katri ≠ a snack. Do not "correct" Marathi names into unrelated English products.
-2. 'secondName': Marathi script for the SAME product (e.g. "कात्री" for katri), natural for local search.
-3. 'searchKey': Only NEW extra keywords (English meaning, Hinglish, Marathi) that match the identified product. Do not repeat the old name/old keys; code saves: old name, old searchKey, then yours. Example extras for katri: "scissor, scissors, कात्री, cutter".
-4. 'description': 2-sentence English description of the IDENTIFIED product (not a guessed food item).
-5. 'secondaryDescription': Same description in Marathi.
-{category_block}
-Output requirement:
-Return ONLY a valid JSON array. Length must equal the number of input objects. Each element must be exactly this shape:
-{output_shape}
+==================================================
+CORE PRODUCT IDENTIFICATION
+==================================================
 
-Do not include markdown, explanations, or any text outside the JSON array."""
+For EACH product, identify the REAL product FIRST.
+
+Use all available information:
+
+- existingName
+- existingSecondName
+- existingSearchKey
+- brand
+- category
+- description
+- unit
+- other supplied product information
+
+Understand Marathi/local/Roman Marathi terminology before interpreting
+the product.
+
+Do NOT guess from English dictionary meanings.
+
+Examples:
+
+"mug dal" → मुग डाळ / मूग डाळ / Moong Dal
+
+"katri" → कात्री / Scissors
+
+"tandul" → तांदूळ / Rice
+
+"tangool" → तांदूळ / Rice
+
+"jwari" → ज्वारी / Jowar
+
+"gahu" → गहू / Wheat
+
+"batata" → बटाटा / Potato
+
+"kanda" → कांदा / Onion
+
+"lasun" → लसूण / Garlic
+
+If a local word could have multiple meanings and the available product
+information does not clearly identify it, DO NOT invent a different product.
+
+==================================================
+NAME
+==================================================
+
+1. "name"
+
+Keep the original shop/product words and identity.
+
+Customers may search the original spelling, so do NOT unnecessarily replace
+or rewrite the product name.
+
+You may:
+
+- Fix unnecessary spacing
+- Capitalize English product names naturally
+- Improve readability
+- Preserve brand capitalization
+- Preserve pack size
+- Add a short English meaning in parentheses when useful
+
+Example:
+
+"mug dal 500gm"
+→ "Mug Dal 500gm"
+
+"Katri"
+→ "Katri (Scissors)"
+
+Do NOT use programming camelCase.
+
+Correct:
+"Mug Dal 500gm"
+
+Incorrect:
+"mugDal500gm"
+
+IMPORTANT:
+
+Do NOT change a local word into an unrelated English product.
+
+Examples:
+
+"Dale" ≠ "Dal"
+
+"Katri" ≠ a food/snack
+
+"Mug Dal" ≠ drinking mug
+
+Local Marathi/Roman Marathi product names must be interpreted in the
+Indian/Maharashtra grocery context first.
+
+==================================================
+SECOND NAME
+==================================================
+
+2. "secondName"
+
+Create a natural Marathi-script name for the SAME product.
+
+Use Marathi terminology used by customers in Maharashtra.
+
+Do NOT translate through Hindi.
+
+Examples:
+
+"Mug Dal 500gm"
+→ "मुग डाळ ५०० ग्रॅम"
+
+"Tandul 5kg"
+→ "तांदूळ ५ किलो"
+
+"Kanda 1kg"
+→ "कांदा १ किलो"
+
+If existingSecondName is already correct and natural, preserve it.
+
+Do not create an unrelated Marathi translation.
+
+==================================================
+SEARCH KEY — MOST IMPORTANT
+==================================================
+
+3. "searchKey"
+
+Generate ONLY NEW additional search keywords.
+
+DO NOT repeat the existing product name.
+
+DO NOT repeat existingSearchKey values.
+
+The application will combine:
+
+existing product name
++
+existingSearchKey
++
+your newly generated searchKey
+
+Therefore, your output searchKey must contain ONLY NEW useful search terms.
+
+Existing searchKey values are trusted existing data.
+
+NEVER remove, replace, rewrite, or correct existing searchKey values.
+
+==================================================
+SEARCH KEY OBJECTIVE
+==================================================
+
+Generate a universal product-search vocabulary for the SAME product.
+
+The searchKey will be used by:
+
+- E-commerce website search
+- Android app search
+- POS billing search
+- Admin product search
+- Autocomplete
+- Fuzzy search
+- Customer product discovery
+
+Generate terms based on how a REAL Maharashtra customer may search.
+
+Consider the following when relevant:
+
+A. English product names
+B. English synonyms
+C. Marathi product names
+D. Roman Marathi
+E. Common local pronunciation
+F. Marathi + English mixed searches
+G. Brand name
+H. Brand + product
+I. Product + brand
+J. Product + pack size
+K. Marathi + pack size
+L. English + pack size
+M. Common Indian supermarket terminology
+N. Realistic spelling variations
+O. Singular/plural variations
+P. Short customer search terms
+
+Do NOT generate every category blindly.
+
+Only generate terms that are genuinely relevant to the exact product.
+
+==================================================
+MARATHI LANGUAGE RULE — VERY IMPORTANT
+==================================================
+
+Our primary local language is MARATHI.
+
+DO NOT use Hindi terminology when generating:
+
+- secondName
+- Marathi descriptions
+- Marathi search keywords
+- Roman Marathi search keywords
+
+Use natural Marathi terminology used by customers in Maharashtra.
+
+English equivalents ARE allowed because customers also search in English.
+
+Example:
+
+तांदूळ:
+- tandul
+- tandool
+- tangul
+- tangool
+- rice
+
+Do NOT prefer Hindi:
+- chawal
+
+Example:
+
+साखर:
+- sakhar
+- saakhar
+- sugar
+
+Do NOT use Hindi:
+- shakkar
+
+Example:
+
+हळद:
+- halad
+- halad powder
+- turmeric
+
+Do NOT use Hindi:
+- haldi
+
+Example:
+
+कांदा:
+- kanda
+- onion
+
+Do NOT use Hindi:
+- pyaz
+
+Example:
+
+बटाटा:
+- batata
+- potato
+
+Do NOT use Hindi:
+- aloo
+
+Example:
+
+मुग डाळ:
+- mug dal
+- moog dal
+- moong dal
+- mung dal
+- मुग डाळ
+- मूग डाळ
+- मुगाची डाळ
+
+Do NOT intentionally generate Hindi equivalents.
+
+==================================================
+REGULAR MARATHI CUSTOMER TYPING
+==================================================
+
+Marathi customers often type Marathi using English/Roman letters.
+
+They do NOT necessarily use standardized transliteration.
+
+They may type according to local pronunciation.
+
+Therefore, generate realistic Roman Marathi variations when useful.
+
+Example:
+
+Marathi:
+"तांदूळ"
+
+Possible customer searches:
+
+tandul
+tandool
+tangul
+tangool
+tandul rice
+rice
+तांदूळ
+तांदुळ
+तांदुल
+
+Example:
+
+Marathi:
+"मुग डाळ"
+
+Possible searches:
+
+mug dal
+moog dal
+moong dal
+mung dal
+mug daal
+moog daal
+moong daal
+mugdaal
+मुग डाळ
+मूग डाळ
+मुगाची डाळ
+
+Example:
+
+Marathi:
+"ज्वारी"
+
+Possible searches:
+
+jwari
+jowari
+jowar
+jwari bhakri
+jowar flour
+ज्वारी
+
+Example:
+
+Marathi:
+"गहू"
+
+Possible searches:
+
+gahu
+gahoo
+wheat
+gahu wheat
+गहू
+
+Example:
+
+Marathi:
+"साखर"
+
+Possible searches:
+
+sakhar
+saakhar
+sakkhar
+sugar
+sakhar sugar
+साखर
+
+Example:
+
+Marathi:
+"कोथिंबीर"
+
+Possible searches:
+
+kothimbir
+kothmir
+coriander
+coriander leaves
+कोथिंबीर
+
+==================================================
+ROMAN MARATHI VARIATION RULE
+==================================================
+
+Do not assume there is only one correct Roman spelling.
+
+For important Marathi product words, consider realistic customer typing
+variations caused by:
+
+- Local pronunciation
+- Missing vowels
+- Double vowels
+- Different vowel spellings
+- Common consonant variations
+- Phonetic typing
+- English keyboard typing
+- Local Maharashtra pronunciation
+
+Examples:
+
+तांदूळ:
+tandul
+tandool
+tangul
+tangool
+
+मुग:
+mug
+moog
+moong
+mung
+
+डाळ:
+dal
+daal
+
+साखर:
+sakhar
+saakhar
+sakkhar
+
+लसूण:
+lasun
+lasoon
+
+मिरची:
+mirchi
+mirch
+mirchi powder
+
+However:
+
+DO NOT generate unlimited spelling combinations.
+
+Only include realistic customer searches.
+
+==================================================
+ENGLISH EQUIVALENTS
+==================================================
+
+Include the commonly used English product equivalent when customers may
+search using English.
+
+Examples:
+
+तांदूळ → rice
+
+गहू → wheat
+
+ज्वारी → jowar / sorghum
+
+बटाटा → potato
+
+कांदा → onion
+
+लसूण → garlic
+
+हळद → turmeric
+
+मुग डाळ → moong dal
+
+Use the English equivalent as an additional search term.
+
+Do not replace the Marathi product identity with English.
+
+==================================================
+BRAND SEARCH
+==================================================
+
+If a brand exists, include useful combinations such as:
+
+brand
+brand + product
+product + brand
+brand + size
+
+Example:
+
+Wheel
+Wheel powder
+Wheel detergent
+Wheel washing powder
+
+Do NOT add competitor brands.
+
+Do NOT invent brands.
+
+==================================================
+PACK SIZE / QUANTITY
+==================================================
+
+If the product has a known size or quantity, include realistic search formats.
+
+Example for 500gm:
+
+500gm
+500 gm
+500g
+500 g
+५०० ग्रॅम
+५००g
+
+Useful combinations may include:
+
+moong dal 500g
+moong dal 500gm
+mug dal 500g
+मुग डाळ ५०० ग्रॅम
+
+Only use the actual product size.
+
+NEVER invent another size.
+
+==================================================
+SPELLING VARIATIONS
+==================================================
+
+Generate only realistic spelling variations that customers may actually use.
+
+Examples:
+
+tandul
+tandool
+tangul
+tangool
+
+mug dal
+moog dal
+moong dal
+mung dal
+
+powder
+pavdar
+
+Do NOT generate hundreds of artificial spelling mistakes.
+
+==================================================
+SEARCH KEY QUANTITY
+==================================================
+
+Prefer HIGH RELEVANCE over HIGH QUANTITY.
+
+Normally generate approximately 10-40 useful NEW search terms depending
+on the complexity of the product.
+
+Simple products may need fewer.
+
+Products with multiple common names may need more.
+
+Do NOT generate hundreds of keywords.
+
+==================================================
+DO NOT GENERATE MARKETING / SEO TERMS
+==================================================
+
+Do NOT generate generic marketing phrases such as:
+
+best product
+cheap product
+best price
+buy online
+online shopping
+online grocery
+offer
+discount
+sale
+near me
+home delivery
+
+These are NOT product identity/search keywords.
+
+The searchKey should describe WHAT THE PRODUCT IS and HOW customers
+naturally search for it.
+
+==================================================
+DO NOT INVENT PRODUCT INFORMATION
+==================================================
+
+Never invent:
+
+- Brand
+- Size
+- Weight
+- Ingredients
+- Flavor
+- Variant
+- Product feature
+- Product benefit
+- Certification
+- Medical claim
+- Nutritional claim
+- Competitor brand
+- Unsupported usage
+
+Use only information supported by the supplied product data.
+
+==================================================
+DESCRIPTION
+==================================================
+
+4. "description"
+
+Create a concise 2-sentence English description of the IDENTIFIED product.
+
+The description must describe the actual product.
+
+Do not guess unsupported features, ingredients, benefits, or claims.
+
+==================================================
+SECONDARY DESCRIPTION
+==================================================
+
+5. "secondaryDescription"
+
+Create the same description naturally in MARATHI.
+
+Use simple, natural Marathi used in Maharashtra.
+
+DO NOT translate into Hindi.
+
+Do not perform an unnatural word-for-word translation.
+
+==================================================
+CATEGORIES
+==================================================
+
+6. "categoryIds"
+
+Identify the product FIRST.
+
+Then select categories that match the REAL product.
+
+Prefer:
+- 1 category
+
+Maximum:
+- {MAX_CATEGORY_IDS_PER_PRODUCT} categories
+
+Do NOT dump unrelated categories.
+
+Example:
+
+"katri" → stationery / hardware
+
+NEVER:
+
+katri → mukwas / bakery / snacks
+
+If existing categories are correct:
+keep them.
+
+If existing categories are clearly wrong:
+replace them.
+
+If product identity is uncertain:
+keep existingCategoryIds or return [].
+
+{category_catalog_block}
+
+==================================================
+FINAL VALIDATION
+==================================================
+
+Before returning each product, verify:
+
+1. Is the product correctly identified?
+2. Is the original product identity preserved?
+3. Is the name still searchable using the original spelling?
+4. Is secondName the SAME product in natural Marathi?
+5. Is Hindi terminology avoided?
+6. Are Marathi search keywords included where useful?
+7. Are Roman Marathi customer spellings included where useful?
+8. Are English equivalents included where useful?
+9. Are local pronunciation variations included where useful?
+10. Are brand combinations included where useful?
+11. Is the actual pack size included?
+12. Are realistic spelling variations included?
+13. Are existing searchKey values NOT repeated?
+14. Are existing searchKey values NOT removed or changed?
+15. Are duplicate NEW keywords removed?
+16. Are unrelated brands excluded?
+17. Are marketing/SEO phrases excluded?
+18. Are prices excluded?
+19. Are unsupported claims excluded?
+20. Are unrelated categories excluded?
+21. Would these keywords realistically help a Maharashtra customer find
+    this exact product?
+
+==================================================
+OUTPUT
+==================================================
+
+Output ONLY a valid JSON array.
+
+Same length as input.
+
+Same order as input.
+
+No markdown.
+
+No explanation.
+
+No code fences.
+
+Each object MUST have exactly:
+
+{{
+  "name": "",
+  "secondName": "",
+  "searchKey": "",
+  "description": "",
+  "secondaryDescription": "",
+  "categoryIds": []
+}}"""
 
 
 def _parse_gemini_json(raw_text: str) -> List[Dict[str, Any]]:
