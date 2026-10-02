@@ -36,23 +36,29 @@ const getProducts = async (req, res) => {
     });
 
     // -----------------------------
-    // 🔍 Fuzzy Search (handles typos)
+    // 🔍 Search (name, Marathi name, searchKey, brand, barcode)
+    // Same idea as billing POS: "tamalpatra" finds Bay Leaf via searchKey
     // -----------------------------
     if (search && String(search).trim()) {
-      const normalized = String(search).trim();
-      // "sakhar" → /s.*a.*k.*h.*a.*r/i
-      const searchRegex = new RegExp(normalized.split("").join(".*"), "i");
+      const searchTerm = String(search).trim();
+      const escapedSearch = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      // Optional spaces between chars: "tamalpatra" also matches "tamal patra"
+      const normalizedPattern = escapedSearch.split("").join("\\s*");
+      const searchRegex = new RegExp(normalizedPattern, "i");
+      const partialRegex = new RegExp(escapedSearch, "i");
 
       andConditions.push({
         $or: [
           { name: { $regex: searchRegex } },
           { secondName: { $regex: searchRegex } },
-          { brand: { $regex: searchRegex } },
+          { searchKey: { $regex: partialRegex } },
+          { searchKey: { $regex: searchRegex } },
+          { brand: { $regex: partialRegex } },
           {
             $expr: {
               $regexMatch: {
                 input: { $toString: "$barcode" },
-                regex: normalized,
+                regex: escapedSearch,
                 options: "i",
               },
             },
